@@ -8,9 +8,9 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
     cors: {
-        origin: "https://personitacard.netlify.app/", // GELİŞTİRME İÇİN: Tüm kaynaklara izin ver. Yayınlarken frontend adresinizle değiştirin.
-        methods: ["GET", "POST"]
-    }
+    origin: "https://personitacard.netlify.app", // SONUNDAKİ EĞİK ÇİZGİ KALDIRILDI
+    methods: ["GET", "POST"]
+}
 });
 
 let rooms = {}; // { roomID: { users: Set(), selectedCards: Map() } }
