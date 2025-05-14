@@ -8,7 +8,7 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
     cors: {
-        origin: "*", // GELİŞTİRME İÇİN: Tüm kaynaklara izin ver. Yayınlarken frontend adresinizle değiştirin.
+        origin: "https://personitacard.netlify.app/", // GELİŞTİRME İÇİN: Tüm kaynaklara izin ver. Yayınlarken frontend adresinizle değiştirin.
         methods: ["GET", "POST"]
     }
 });
