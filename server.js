@@ -45,7 +45,12 @@ io.on('connection', (socket) => {
         console.log(`Kullanıcı ${socket.id} odaya katıldı: ${roomID}. Odadaki kullanıcı sayısı: ${rooms[roomID].users.size}`);
 
         // Yeni katılan kullanıcıya mevcut seçili kartları gönder
-        socket.emit('currentSelectedCards', Array.from(rooms[roomID].selectedCards.entries()).map(([cardId, data]) => ({ cardId, userId: data.userId })));
+        socket.emit('currentSelectedCards', { // Obje olarak gönderiyoruz
+            roomID: roomID, // Odanın ID'si
+             cardSet: rooms[roomID].cardSet, // Odanın aktif kart seti bilgisini ekledik!
+            selectedCards: Array.from(rooms[roomID].selectedCards.entries()).map(([cardId, data]) => ({ cardId, userId: data.userId })), // Mevcut seçili kartlar
+    userCount: rooms[roomID].users.size // Kullanıcı sayısı bilgisini de ekleyelim
+})
         // Odadaki diğerlerine kullanıcı sayısını veya bilgisini gönder (isteğe bağlı)
         io.to(roomID).emit('userCountUpdate', rooms[roomID].users.size);
     });
