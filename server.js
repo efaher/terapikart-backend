@@ -1,224 +1,275 @@
 const express = require('express');
 const http = require('http');
-const socketIo = require('socket.io');
+const crypto = require('crypto');
+const { Server } = require('socket.io');
 
-const PORT = process.env.PORT || 3001; // Render için PORT ortam değişkeni
+const PORT = process.env.PORT || 3001;
+const DEFAULT_ORIGINS = [
+  'https://personitacard.netlify.app',
+  'http://localhost:5500',
+  'http://127.0.0.1:5500',
+  'http://localhost:3000'
+];
+
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || DEFAULT_ORIGINS.join(','))
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server, {
-    cors: {
-        origin: "https://personitacard.netlify.app", // SONUNDAKİ EĞİK ÇİZGİ KALDIRILDI
-        methods: ["GET", "POST"]
-    }
+const io = new Server(server, {
+  cors: {
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error('Origin not allowed by CORS'));
+    },
+    methods: ['GET', 'POST']
+  }
 });
 
-let rooms = {}; // { roomID: { users: Set(), selectedCards: Map(), cardSet: string } } // Yorum güncellendi
-const MAX_USERS_PER_ROOM = 3;
+const CARD_SETS = {
+  personita: { total: 77 },
+  terapi_sb: { total: 44 }
+};
+
+const MAX_SELECTED_CARDS = 10;
+const rooms = new Map();
+
+function createToken() {
+  return crypto.randomBytes(24).toString('base64url');
+}
+
+function createRoomId() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let id = '';
+  do {
+    id = Array.from({ length: 8 }, () => alphabet[crypto.randomInt(0, alphabet.length)]).join('');
+  } while (rooms.has(id));
+  return id;
+}
+
+function publicRoomState(room) {
+  return {
+    roomID: room.id,
+    cardSet: room.cardSet,
+    selectedCards: Array.from(room.selectedCards.values())
+      .sort((a, b) => a.order - b.order),
+    advisorConnected: Boolean(room.advisorSocketId),
+    clientConnected: Boolean(room.clientSocketId)
+  };
+}
+
+function emitRoomState(room) {
+  io.to(room.id).emit('roomState', publicRoomState(room));
+}
+
+function getSocketSession(socket) {
+  if (!socket.data.roomID || !socket.data.role) return null;
+  const room = rooms.get(socket.data.roomID);
+  if (!room) return null;
+  return { room, role: socket.data.role };
+}
+
+function detachSocket(socket, { removeSelections = false } = {}) {
+  const session = getSocketSession(socket);
+  if (!session) return;
+
+  const { room, role } = session;
+  if (role === 'advisor' && room.advisorSocketId === socket.id) {
+    room.advisorSocketId = null;
+  }
+  if (role === 'client' && room.clientSocketId === socket.id) {
+    room.clientSocketId = null;
+    if (removeSelections) room.selectedCards.clear();
+  }
+
+  socket.leave(room.id);
+  socket.data.roomID = null;
+  socket.data.role = null;
+  emitRoomState(room);
+}
 
 app.get('/', (req, res) => {
-    res.send('Terapik Kartlar Backend Çalışıyor!');
+  res.json({
+    name: 'Persona Card realtime backend',
+    version: '1.0.0-v1',
+    status: 'ok'
+  });
+});
+
+app.get('/health', (req, res) => {
+  res.json({ ok: true, rooms: rooms.size });
 });
 
 io.on('connection', (socket) => {
-    console.log('Yeni bir kullanıcı bağlandı:', socket.id);
+  socket.on('createRoom', ({ cardSet } = {}) => {
+    if (!CARD_SETS[cardSet]) {
+      socket.emit('sessionError', { code: 'INVALID_CARD_SET', message: 'Geçersiz kart seti.' });
+      return;
+    }
 
-    // DEĞİŞTİRİLDİ: 'joinRoom' olayı artık 'data' objesi alıyor ({roomID, cardSet})
-    socket.on('joinRoom', (data) => {
-        const roomID = data.roomID; // Oda ID'sini data'dan al
-        const cardSetFromClient = data.cardSet; // Kart Seti bilgisini data'dan al
+    detachSocket(socket);
 
-        // roomID veya cardSet yoksa hata işle (frontend doğru data göndermeli)
-        if (!roomID || !cardSetFromClient) {
-            console.warn(`Geçersiz joinRoom isteği: roomID=${roomID}, cardSet=${cardSetFromClient}`);
-            socket.emit('errorJoiningRoom', 'Geçersiz oda veya kart seti bilgisi.'); // Frontend'e hata gönder
-            return;
-        }
+    const roomID = createRoomId();
+    const advisorToken = createToken();
+    const clientToken = createToken();
+    const room = {
+      id: roomID,
+      cardSet,
+      advisorToken,
+      clientToken,
+      advisorSocketId: socket.id,
+      clientSocketId: null,
+      selectedCards: new Map(),
+      nextOrder: 1,
+      createdAt: Date.now()
+    };
 
-        if (!rooms[roomID]) {
-            // Oda yoksa oluştur ve kart setini kaydet
-            rooms[roomID] = {
-                users: new Set(),
-                selectedCards: new Map(), // cardId -> { userId: socket.id }
-                cardSet: cardSetFromClient // Odayı oluştururken kart setini kaydettik!
-            };
-            console.log(`Oda oluşturuldu: ${roomID} ile kart seti: ${cardSetFromClient}`);
-        } else {
-            // Oda varsa
-            // Odaya katılan kullanıcının göndermeye çalıştığı set ile
-            // Odanın zaten kurulu olduğu setin aynı olup olmadığını KONTROL EDELİM!
-            if (rooms[roomID].cardSet && rooms[roomID].cardSet !== cardSetFromClient) {
-                 // Eğer oda zaten farklı bir set ile kurulmuşsa
-                 socket.emit('errorJoiningRoom', 'Bu oda farklı bir kart seti ile kurulmuş.'); // Frontend'e hata gönder
-                 console.warn(`Kullanıcı ${socket.id} odaya ${roomID} katılmaya çalıştı, farklı set: ${cardSetFromClient}. Odanın seti: ${rooms[roomID].cardSet}`);
-                 return; // Odaya katılmasına izin verme
-            }
-             // Oda varsa ve set aynıysa veya oda ilk kez kuruluyorsa (yukarıdaki if'te yakalanır) devam et
-             console.log(`Kullanıcı ${socket.id} odaya katılıyor: ${roomID} (Set: ${rooms[roomID].cardSet})`);
-        }
+    rooms.set(roomID, room);
+    socket.join(roomID);
+    socket.data.roomID = roomID;
+    socket.data.role = 'advisor';
 
-
-        // Kullanıcı sayısı limit kontrolü (Buraya taşındı)
-        if (rooms[roomID].users.size >= MAX_USERS_PER_ROOM) {
-            socket.emit('roomFull');
-            console.log(`Oda dolu: ${roomID}, kullanıcı ${socket.id} katılamadı.`);
-            return;
-        }
-
-
-        socket.join(roomID);
-        rooms[roomID].users.add(socket.id);
-        socket.currentRoom = roomID; // Kullanıcının mevcut odasını sakla
-
-        console.log(`Kullanıcı ${socket.id} başarıyla odaya katıldı: ${roomID}. Odadaki kullanıcı sayısı: ${rooms[roomID].users.size}`);
-
-        // Yeni katılan kullanıcıya odanın mevcut durumunu gönder
-        socket.emit('currentSelectedCards', { // Obje olarak gönderiyoruz
-            roomID: roomID, // Odanın ID'si
-            cardSet: rooms[roomID].cardSet, // <<<<< Burası artık tanımlı olmalı
-            selectedCards: Array.from(rooms[roomID].selectedCards.entries()).map(([cardId, data]) => ({ cardId, userId: data.userId })), // Mevcut seçili kartlar
-            userCount: rooms[roomID].users.size // Kullanıcı sayısı bilgisini de ekleyelim
-        });
-
-        // Odadaki diğerlerine kullanıcı sayısı bilgisini gönder
-        io.to(roomID).emit('userCountUpdate', rooms[roomID].users.size);
-        // NOT: Frontend'de 'userCountUpdate' olayını dinleyip arayüzde göstermiyoruz henüz, isteğe bağlı.
+    socket.emit('roomCreated', {
+      ...publicRoomState(room),
+      advisorToken,
+      clientToken
     });
+    emitRoomState(room);
+  });
 
+  socket.on('joinRoom', ({ roomID, token } = {}) => {
+    const normalizedRoomID = String(roomID || '').trim().toUpperCase();
+    const room = rooms.get(normalizedRoomID);
 
-    // selectCard olayı artık data objesi almalı {roomID, cardId}
-    socket.on('selectCard', (data) => {
-         const roomID = data.roomID;
-         const cardId = data.cardId; // cardId'yi data'dan al
+    if (!room || !token) {
+      socket.emit('sessionError', { code: 'ROOM_NOT_FOUND', message: 'Oturum bulunamadı veya bağlantı geçersiz.' });
+      return;
+    }
 
-        if (rooms[roomID] && rooms[roomID].users.has(socket.id)) {
-            // Backend tarafında da her kullanıcının seçebileceği kişisel limiti kontrol etmek GEREKİR.
-            // Şu an sadece odadaki toplam farklı kart limitini kontrol ediyoruz (10).
-            // Kişisel limit kontrolü frontend'de yapılıyor, ama backend'de de olması daha güvenlidir.
-            // MVP için sadece toplam 10 limitine bakalım.
+    let role = null;
+    if (token === room.advisorToken) role = 'advisor';
+    if (token === room.clientToken) role = 'client';
 
-            if (rooms[roomID].selectedCards.size < 10 || rooms[roomID].selectedCards.has(cardId)) {
-                 // Eğer toplam kart sayısı 10'dan azsa VEYA bu kart zaten seçiliyse (üstüne seçebiliriz)
-                 rooms[roomID].selectedCards.set(cardId, { userId: socket.id });
-                 // Seçim bilgisini odadaki herkese gönder
-                 io.to(roomID).emit('cardSelected', { cardId: cardId, userId: socket.id });
-                 console.log(`Kullanıcı ${socket.id}, oda ${roomID} için kart seçti: ${cardId}`);
-             } else {
-                 // Toplam 10 kart limiti dolmuş ve yeni bir kart seçilmeye çalışılıyor
-                 socket.emit('maxCardsReached'); // Frontend'e bilgi gönder
-                 console.warn(`Kullanıcı ${socket.id}, oda ${roomID} için limit doluyken kart seçmeye çalıştı: ${cardId}`);
-             }
-        } else {
-             console.warn(`Kullanıcı ${socket.id}, geçersiz odada (${roomID}) kart seçmeye çalıştı.`);
-        }
+    if (!role) {
+      socket.emit('sessionError', { code: 'INVALID_TOKEN', message: 'Bu oturum bağlantısı geçersiz.' });
+      return;
+    }
+
+    if (role === 'client' && room.clientSocketId && room.clientSocketId !== socket.id) {
+      socket.emit('sessionError', { code: 'CLIENT_ALREADY_CONNECTED', message: 'Bu oturuma bir danışan zaten bağlı.' });
+      return;
+    }
+
+    detachSocket(socket);
+    socket.join(room.id);
+    socket.data.roomID = room.id;
+    socket.data.role = role;
+
+    if (role === 'advisor') room.advisorSocketId = socket.id;
+    if (role === 'client') room.clientSocketId = socket.id;
+
+    socket.emit('joinedRoom', {
+      ...publicRoomState(room),
+      role
     });
+    emitRoomState(room);
+  });
 
+  socket.on('selectCard', ({ cardId } = {}) => {
+    const session = getSocketSession(socket);
+    if (!session || session.role !== 'client') {
+      socket.emit('sessionError', { code: 'NOT_ALLOWED', message: 'Kartları yalnızca danışan seçebilir.' });
+      return;
+    }
 
-    // deselectCard olayı artık data objesi almalı {roomID, cardId}
-    socket.on('deselectCard', (data) => {
-         const roomID = data.roomID;
-         const cardId = data.cardId; // cardId'yi data'dan al
+    const { room } = session;
+    const numericCardId = Number(cardId);
+    const cardSet = CARD_SETS[room.cardSet];
 
-        if (rooms[roomID] && rooms[roomID].users.has(socket.id) && rooms[roomID].selectedCards.has(cardId)) {
-            // Sadece kendi seçtiği kartı iptal etmesine izin ver (Frontend'de de kontrol ediliyor, backend'de de edelim)
-            if (rooms[roomID].selectedCards.get(cardId).userId === socket.id) {
-                 rooms[roomID].selectedCards.delete(cardId);
-                 // İptal bilgisini odadaki herkese gönder
-                 io.to(roomID).emit('cardDeselected', { cardId: cardId, userId: socket.id }); // Kimin deselect ettiğini de gönderiyoruz
-                 console.log(`Kullanıcı ${socket.id}, oda ${roomID} için kart seçimini iptal etti: ${cardId}`);
-             } else {
-                 console.warn(`Kullanıcı ${socket.id}, başkasının kartını (${cardId}) iptal etmeye çalıştı.`);
-                 // Frontend'e hata gönderilebilir
-             }
-        } else {
-             console.warn(`Kullanıcı ${socket.id}, geçersiz odada (${roomID}) veya seçili olmayan kartı (${cardId}) iptal etmeye çalıştı.`);
-        }
+    if (!Number.isInteger(numericCardId) || numericCardId < 1 || numericCardId > cardSet.total) {
+      socket.emit('sessionError', { code: 'INVALID_CARD', message: 'Geçersiz kart.' });
+      return;
+    }
+
+    const key = String(numericCardId);
+    if (room.selectedCards.has(key)) return;
+
+    if (room.selectedCards.size >= MAX_SELECTED_CARDS) {
+      socket.emit('sessionError', { code: 'MAX_CARDS', message: `En fazla ${MAX_SELECTED_CARDS} kart seçilebilir.` });
+      return;
+    }
+
+    room.selectedCards.set(key, {
+      cardId: key,
+      order: room.nextOrder++
     });
+    emitRoomState(room);
+  });
 
-    // resetRoomCards olayı artık data objesi almalı {roomID}
-    socket.on('resetRoomCards', (roomID) => { // roomID'yi doğrudan alıyor, data objesi değil (önceki frontend koduna göre)
-        if (rooms[roomID]) {
-            // Sadece admin yetkisi eklenecek ileride
-            // MVP için şimdilik, bu olayı backend'e gönderen ilk kişi (frontend'de reset butonuna basan) sıfırlamayı tetikler.
-            // Eğer sadece odayı kuran admin sıfırlasın istersek backend'de yetki kontrolü gerekir (Faz 2)
+  socket.on('deselectCard', ({ cardId } = {}) => {
+    const session = getSocketSession(socket);
+    if (!session || session.role !== 'client') {
+      socket.emit('sessionError', { code: 'NOT_ALLOWED', message: 'Kart seçimini yalnızca danışan değiştirebilir.' });
+      return;
+    }
 
-            rooms[roomID].selectedCards.clear();
-            io.to(roomID).emit('roomCardsReset'); // Odaya ait herkese sıfırlama mesajı gönder
-            console.log(`Oda ${roomID} için kartlar sıfırlandı (tetikleyen kullanıcı: ${socket.id}).`);
-        } else {
-             console.warn(`Geçersiz oda (${roomID}) için sıfırlama isteği geldi.`);
+    session.room.selectedCards.delete(String(cardId));
+    emitRoomState(session.room);
+  });
+
+  socket.on('resetRoomCards', () => {
+    const session = getSocketSession(socket);
+    if (!session || session.role !== 'advisor') {
+      socket.emit('sessionError', { code: 'NOT_ALLOWED', message: 'Seçimleri yalnızca danışman sıfırlayabilir.' });
+      return;
+    }
+
+    session.room.selectedCards.clear();
+    session.room.nextOrder = 1;
+    emitRoomState(session.room);
+  });
+
+  socket.on('closeRoom', () => {
+    const session = getSocketSession(socket);
+    if (!session || session.role !== 'advisor') {
+      socket.emit('sessionError', { code: 'NOT_ALLOWED', message: 'Oturumu yalnızca danışman kapatabilir.' });
+      return;
+    }
+
+    const { room } = session;
+    io.to(room.id).emit('roomClosed', { roomID: room.id });
+    rooms.delete(room.id);
+
+    const sockets = io.sockets.adapter.rooms.get(room.id);
+    if (sockets) {
+      for (const socketId of sockets) {
+        const participant = io.sockets.sockets.get(socketId);
+        if (participant) {
+          participant.leave(room.id);
+          participant.data.roomID = null;
+          participant.data.role = null;
         }
-    });
+      }
+    }
+  });
 
-    // YENİ: leaveRoom olayı (Kullanıcı odadan ayrılma isteği gönderirse)
-    socket.on('leaveRoom', (roomID) => {
-        if (rooms[roomID] && rooms[roomID].users.has(socket.id)) {
-            // Socket.IO odasından ayrıl
-            socket.leave(roomID);
-            // rooms objesinden kullanıcıyı sil
-            rooms[roomID].users.delete(socket.id);
-            socket.currentRoom = null; // Kullanıcının mevcut oda bilgisini temizle
+  socket.on('leaveRoom', () => {
+    detachSocket(socket);
+  });
 
-            console.log(`Kullanıcı ${socket.id} odadan ayrıldı: ${roomID}. Kalan kullanıcı sayısı: ${rooms[roomID].users.size}`);
+  socket.on('disconnect', () => {
+    const session = getSocketSession(socket);
+    if (!session) return;
 
-            // Bu kullanıcının seçtiği kartları temizle (isteğe bağlı ama iyi bir pratik)
-            rooms[roomID].selectedCards.forEach((data, cardId) => {
-                if (data.userId === socket.id) {
-                    rooms[roomID].selectedCards.delete(cardId);
-                    // Odadaki diğerlerine bu kartın iptal edildiğini bildir
-                    io.to(roomID).emit('cardDeselected', { cardId: cardId, userId: socket.id });
-                }
-            });
-
-            if (rooms[roomID].users.size === 0) {
-                // Oda boşaldıysa odayı sil
-                delete rooms[roomID];
-                console.log(`Oda boşaldı ve silindi: ${roomID}`);
-            } else {
-                // Odada kalanlara kullanıcı sayısını güncelle
-                io.to(roomID).emit('userCountUpdate', rooms[roomID].users.size);
-            }
-        } else {
-            console.warn(`Kullanıcı ${socket.id}, olmayan bir odadan (${roomID}) ayrılmaya çalıştı.`);
-        }
-    });
-
-
-    socket.on('disconnect', () => {
-        console.log('Kullanıcı bağlantıyı kesti:', socket.id);
-        const roomID = socket.currentRoom; // Bağlanırken kaydettiğimiz oda ID'sini kullan
-        // Eğer kullanıcı bir odadaysa, odadan ayrılma mantığını çalıştır
-        if (roomID && rooms[roomID]) {
-            // Socket.IO odasından otomatik olarak zaten ayrılmıştır.
-            // rooms objesinden kullanıcıyı sil
-            rooms[roomID].users.delete(socket.id);
-            socket.currentRoom = null; // Kullanıcının mevcut oda bilgisini temizle
-
-            console.log(`Bağlantısı kesilen kullanıcı (${socket.id}) odadan ayrıldı: ${roomID}. Kalan kullanıcı sayısı: ${rooms[roomID].users.size}`);
-
-             // Bu kullanıcının seçtiği kartları temizle (isteğe bağlı ama iyi bir pratik)
-             rooms[roomID].selectedCards.forEach((data, cardId) => {
-                 if (data.userId === socket.id) {
-                     rooms[roomID].selectedCards.delete(cardId);
-                     // Odadaki diğerlerine bu kartın iptal edildiğini bildir
-                     io.to(roomID).emit('cardDeselected', { cardId: cardId, userId: socket.id });
-                 }
-             });
-
-
-            if (rooms[roomID].users.size === 0) {
-                // Oda boşaldıysa odayı sil
-                delete rooms[roomID];
-                console.log(`Oda boşaldı ve silindi: ${roomID}`);
-            } else {
-                // Odada kalanlara kullanıcı sayısını güncelle
-                io.to(roomID).emit('userCountUpdate', rooms[roomID].users.size);
-            }
-        }
-        // Eğer bir odada değilken bağlantısı kesildiyse, yapacak başka bir şey yok.
-    });
+    const { room, role } = session;
+    if (role === 'advisor' && room.advisorSocketId === socket.id) room.advisorSocketId = null;
+    if (role === 'client' && room.clientSocketId === socket.id) room.clientSocketId = null;
+    emitRoomState(room);
+  });
 });
 
 server.listen(PORT, () => {
-    console.log(`Sunucu ${PORT} portunda çalışıyor...`);
+  console.log(`Persona Card backend listening on port ${PORT}`);
 });
