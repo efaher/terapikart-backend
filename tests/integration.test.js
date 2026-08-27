@@ -67,9 +67,19 @@ async function createRoom(socket, authToken, cardSet = 'personita') {
 }
 
 async function closeRoom(socket) {
-  const closed = onceSocket(socket, 'roomClosed');
+  const closed = onceSocket(socket, 'roomClosed', (data) => data?.reason === 'closed');
   socket.emit('closeRoom');
   await closed;
+}
+
+async function connectClient(room, sockets) {
+  const clientSocket = io(BASE_URL, { transports: ['websocket'], forceNew: true });
+  sockets.push(clientSocket);
+  await onceSocket(clientSocket, 'connect');
+  const joined = onceSocket(clientSocket, 'joinedRoom', (data) => data?.role === 'client');
+  clientSocket.emit('joinRoom', { roomID: room.roomID, token: room.clientToken });
+  await joined;
+  return clientSocket;
 }
 
 async function run() {
@@ -81,7 +91,10 @@ async function run() {
       AUTH_SECRET: 'persona-card-test-auth-secret-that-is-long-enough',
       ADMIN_LICENSE_SECRET: ADMIN_SECRET,
       ALLOWED_ORIGINS: 'http://127.0.0.1:3210',
-      DATABASE_URL: ''
+      DATABASE_URL: '',
+      ROOM_MAX_AGE_MS: String(6 * 60 * 60 * 1000),
+      ROOM_IDLE_CLEANUP_MS: String(30 * 60 * 1000),
+      ROOM_CLEANUP_INTERVAL_MS: String(15 * 60 * 1000)
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -125,12 +138,37 @@ async function run() {
     sockets.push(advisorSocket);
     await onceSocket(advisorSocket, 'connect');
 
+    // Opening and closing an unused room must not spend a trial session.
+    let room = await createRoom(advisorSocket, authToken);
+    assert.strictEqual(room.advisor.trialSessionsRemaining, 3);
+    await closeRoom(advisorSocket);
+    result = await request('/api/me', { token: authToken });
+    assert.strictEqual(result.data.advisor.trialSessionsRemaining, 3);
+
+    // Creating a new room replaces the advisor's previous unused room.
+    const firstUnusedRoom = await createRoom(advisorSocket, authToken);
+    const replaced = onceSocket(advisorSocket, 'roomClosed', (data) => data?.roomID === firstUnusedRoom.roomID && data?.reason === 'replaced');
+    const secondUnusedRoomPromise = onceSocket(advisorSocket, 'roomCreated');
+    advisorSocket.emit('createRoom', { cardSet: 'personita', authToken });
+    assert.strictEqual((await replaced).reason, 'replaced');
+    const secondUnusedRoom = await secondUnusedRoomPromise;
+    assert.notStrictEqual(secondUnusedRoom.roomID, firstUnusedRoom.roomID);
+    await closeRoom(advisorSocket);
+
+    // A trial session is spent only when a client actually joins.
     for (const expectedRemaining of [2, 1, 0]) {
-      const room = await createRoom(advisorSocket, authToken);
-      assert.ok(room.roomID);
-      assert.ok(room.clientToken);
-      assert.strictEqual(room.advisor.trialSessionsRemaining, expectedRemaining);
+      room = await createRoom(advisorSocket, authToken);
+      assert.strictEqual(room.advisor.trialSessionsRemaining, expectedRemaining + 1);
+      const accountUpdated = onceSocket(
+        advisorSocket,
+        'advisorAccountUpdated',
+        (data) => data?.advisor?.trialSessionsRemaining === expectedRemaining
+      );
+      const clientSocket = await connectClient(room, sockets);
+      const updated = await accountUpdated;
+      assert.strictEqual(updated.advisor.trialSessionsRemaining, expectedRemaining);
       await closeRoom(advisorSocket);
+      clientSocket.disconnect();
     }
 
     const quotaError = onceSocket(advisorSocket, 'sessionError', (data) => data?.code === 'LICENSE_REQUIRED');
@@ -162,16 +200,10 @@ async function run() {
     assert.strictEqual(result.data.canCreateSession, true);
     assert.strictEqual(result.data.advisor.plan, 'annual');
 
-    const room = await createRoom(advisorSocket, authToken, 'terapi_sb');
+    room = await createRoom(advisorSocket, authToken, 'terapi_sb');
     assert.strictEqual(room.cardSet, 'terapi_sb');
 
-    const clientSocket = io(BASE_URL, { transports: ['websocket'], forceNew: true });
-    sockets.push(clientSocket);
-    await onceSocket(clientSocket, 'connect');
-
-    const joined = onceSocket(clientSocket, 'joinedRoom', (data) => data?.role === 'client');
-    clientSocket.emit('joinRoom', { roomID: room.roomID, token: room.clientToken });
-    assert.strictEqual((await joined).role, 'client');
+    const clientSocket = await connectClient(room, sockets);
 
     const advisorSeesSelection = onceSocket(
       advisorSocket,
@@ -211,7 +243,7 @@ async function run() {
     const extensionDays = (renewedUntil - firstLicenseUntil) / (24 * 60 * 60 * 1000);
     assert.ok(extensionDays >= 364 && extensionDays <= 366, `Expected ~365 day extension, got ${extensionDays}`);
 
-    console.log('Integration test passed: auth, quota, annual license, realtime selection and role enforcement.');
+    console.log('Integration test passed: auth, fair trial usage, annual license, realtime selection and role enforcement.');
   } catch (error) {
     console.error(childOutput);
     throw error;
