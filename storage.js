@@ -272,9 +272,9 @@ async function listLicenseEvents(advisorId, limit = 50) {
   const safeLimit = Math.max(1, Math.min(Number(limit) || 50, 100));
   if (!pool) {
     return memoryLicenseEvents
-      .filter((event) => event.advisorId === advisorId)
       .slice()
-      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .reverse()
+      .filter((event) => event.advisorId === advisorId)
       .slice(0, safeLimit)
       .map(cloneLicenseEvent);
   }
