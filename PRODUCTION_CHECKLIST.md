@@ -20,11 +20,11 @@ Bu belge V1.2 yıllık profesyonel lisans sürümünün ticari pilot öncesi asg
 2. [x] Hesabın 3 ücretsiz çalışma ile başladığını doğrula.
 3. [x] Danışan katılmadan oda açıp kapat; ücretsiz hakkın düşmediğini doğrula. *(İkinci gerçek pilot turunda doğrulandı.)*
 4. [x] Danışana link gönder ve ikinci cihazdan katıl.
-5. [x] Danışan katıldığında ücretsiz hakkın yalnız bir kez düştüğünü doğrula. *(İlk tur 3 → 2, ikinci tur 2 → 1 gözlendi.)*
+5. [x] Danışan katıldığında ücretsiz hakkın yalnız bir kez düştüğünü doğrula. *(3 → 2 → 1 → 0 gözlendi.)*
 6. [x] Kart seçiminin danışman ekranına gerçek zamanlı düştüğünü doğrula.
 7. [x] Danışanın seçimi kaldırabildiğini doğrula. *(İkinci gerçek pilot turunda doğrulandı.)*
 8. [x] Danışmanın kart seçemediğini; danışanın oturumu sıfırlayıp kapatamadığını doğrula. *(Danışman oturumu başarıyla kapattı.)*
-9. [ ] Üç gerçek danışan katılımından sonra yeni online çalışma oluşturmanın engellendiğini doğrula.
+9. [x] Üç gerçek danışan katılımından sonra yeni online çalışma oluşturmanın engellendiğini doğrula. *(Sayaç 0; çevrimiçi oturum butonu pasif ve yıllık lisans mesajı görüldü.)*
 10. [ ] Yıllık lisansı etkinleştir ve online kullanımın tekrar açıldığını doğrula.
 11. [ ] Lisans yenilemesinin mevcut bitiş tarihinin üzerine bir yıl eklediğini doğrula.
 12. [ ] Lisans hareketinin `license_events` kaydında oluştuğunu doğrula.
