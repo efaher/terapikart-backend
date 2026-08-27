@@ -6,7 +6,7 @@ services:
     region: frankfurt
     repo: https://github.com/efaher/terapikart-backend
     branch: v1.2-annual-license-pwa
-    buildCommand: npm ci --omit=dev
+    buildCommand: npm install --omit=dev --no-audit --no-fund
     startCommand: npm start
     autoDeployTrigger: checksPass
     healthCheckPath: /health
