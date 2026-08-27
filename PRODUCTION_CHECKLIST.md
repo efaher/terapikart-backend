@@ -25,7 +25,7 @@ Bu belge V1.2 yıllık profesyonel lisans sürümünün ticari pilot öncesi asg
 7. [x] Danışanın seçimi kaldırabildiğini doğrula. *(İkinci gerçek pilot turunda doğrulandı.)*
 8. [x] Danışmanın kart seçemediğini; danışanın oturumu sıfırlayıp kapatamadığını doğrula. *(Danışman oturumu başarıyla kapattı.)*
 9. [x] Üç gerçek danışan katılımından sonra yeni online çalışma oluşturmanın engellendiğini doğrula. *(Sayaç 0; çevrimiçi oturum butonu pasif ve yıllık lisans mesajı görüldü.)*
-10. [ ] Yıllık lisansı etkinleştir ve online kullanımın tekrar açıldığını doğrula. *(Staging hesabında lisans etkinleştirme API çağrısı başarılı; `plan=annual` doğrulandı. Arayüzde kullanımın tekrar açılması bekleniyor.)*
+10. [x] Yıllık lisansı etkinleştir ve online kullanımın tekrar açıldığını doğrula. *(Staging hesabında `plan=annual`; lisans 27.08.2027 tarihine kadar aktif göründü ve Android PWA üzerinden yeni çevrimiçi oda başarıyla oluşturuldu.)*
 11. [ ] Lisans yenilemesinin mevcut bitiş tarihinin üzerine bir yıl eklediğini doğrula.
 12. [ ] Lisans hareketinin `license_events` kaydında oluştuğunu doğrula.
 13. [x] Danışmanın uygulamayı PWA olarak kurabildiğini doğrula. *(Android ana ekrana Persona Card olarak başarıyla kuruldu: 2026-08-27.)*
