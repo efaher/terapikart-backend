@@ -4,6 +4,7 @@ const hasDatabase = Boolean(process.env.DATABASE_URL);
 let pool = null;
 const memoryAdvisors = new Map();
 const memoryByEmail = new Map();
+const memoryLicenseEvents = [];
 
 if (hasDatabase) {
   const { Pool } = require('pg');
@@ -19,6 +20,10 @@ function normalizeEmail(email) {
 
 function cloneAdvisor(advisor) {
   return advisor ? { ...advisor } : null;
+}
+
+function cloneLicenseEvent(event) {
+  return event ? { ...event } : null;
 }
 
 function publicAdvisor(advisor) {
@@ -49,6 +54,20 @@ function rowToAdvisor(row) {
   };
 }
 
+function rowToLicenseEvent(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    advisorId: row.advisor_id,
+    eventType: row.event_type,
+    source: row.source,
+    previousLicenseUntil: row.previous_license_until ? new Date(row.previous_license_until).toISOString() : null,
+    newLicenseUntil: row.new_license_until ? new Date(row.new_license_until).toISOString() : null,
+    reference: row.reference || null,
+    createdAt: new Date(row.created_at).toISOString()
+  };
+}
+
 async function initStorage() {
   if (!pool) {
     console.warn('[storage] DATABASE_URL is not configured. Advisor accounts are temporary and reset on restart.');
@@ -67,6 +86,24 @@ async function initStorage() {
       license_until TIMESTAMPTZ NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS license_events (
+      id UUID PRIMARY KEY,
+      advisor_id UUID NOT NULL REFERENCES advisors(id) ON DELETE CASCADE,
+      event_type TEXT NOT NULL,
+      source TEXT NOT NULL,
+      previous_license_until TIMESTAMPTZ NULL,
+      new_license_until TIMESTAMPTZ NOT NULL,
+      reference TEXT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS license_events_advisor_created_idx
+      ON license_events (advisor_id, created_at DESC)
   `);
 }
 
@@ -172,28 +209,84 @@ function nextAnnualExpiry(currentExpiry) {
   return expiry.toISOString();
 }
 
-async function activateAnnualLicense(advisorId) {
+async function activateAnnualLicense(advisorId, { source = 'admin', reference = null } = {}) {
   const advisor = await findAdvisorById(advisorId);
   if (!advisor) return null;
+
+  const previousLicenseUntil = advisor.licenseUntil || null;
+  const newLicenseUntil = nextAnnualExpiry(previousLicenseUntil);
   const updated = {
     ...advisor,
     plan: 'annual',
-    licenseUntil: nextAnnualExpiry(advisor.licenseUntil)
+    licenseUntil: newLicenseUntil
   };
 
   if (!pool) {
     memoryAdvisors.set(updated.id, cloneAdvisor(updated));
+    memoryLicenseEvents.push({
+      id: crypto.randomUUID(),
+      advisorId,
+      eventType: 'annual_activated',
+      source,
+      previousLicenseUntil,
+      newLicenseUntil,
+      reference: reference || null,
+      createdAt: new Date().toISOString()
+    });
     return cloneAdvisor(updated);
   }
 
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const updateResult = await client.query(
+      `UPDATE advisors
+         SET plan = 'annual', license_until = $2
+       WHERE id = $1
+       RETURNING *`,
+      [advisorId, newLicenseUntil]
+    );
+
+    if (!updateResult.rows[0]) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+
+    await client.query(
+      `INSERT INTO license_events
+        (id, advisor_id, event_type, source, previous_license_until, new_license_until, reference)
+       VALUES ($1, $2, 'annual_activated', $3, $4, $5, $6)`,
+      [crypto.randomUUID(), advisorId, String(source || 'admin'), previousLicenseUntil, newLicenseUntil, reference || null]
+    );
+    await client.query('COMMIT');
+    return rowToAdvisor(updateResult.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function listLicenseEvents(advisorId, limit = 50) {
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 50, 100));
+  if (!pool) {
+    return memoryLicenseEvents
+      .filter((event) => event.advisorId === advisorId)
+      .slice()
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, safeLimit)
+      .map(cloneLicenseEvent);
+  }
+
   const result = await pool.query(
-    `UPDATE advisors
-       SET plan = 'annual', license_until = $2
-     WHERE id = $1
-     RETURNING *`,
-    [advisorId, updated.licenseUntil]
+    `SELECT * FROM license_events
+      WHERE advisor_id = $1
+      ORDER BY created_at DESC
+      LIMIT $2`,
+    [advisorId, safeLimit]
   );
-  return rowToAdvisor(result.rows[0]);
+  return result.rows.map(rowToLicenseEvent);
 }
 
 module.exports = {
@@ -205,6 +298,7 @@ module.exports = {
   canCreateSession,
   consumeSessionCredit,
   activateAnnualLicense,
+  listLicenseEvents,
   hasActiveLicense,
   hasDatabase
 };
