@@ -46,3 +46,13 @@ Bu servis Persona Card'ın danışman hesaplarını, yıllık profesyonel lisans
 `GET /health`
 
 Servisin çalışmasını, aktif oda sayısını ve kalıcı hesap veritabanının bağlı olup olmadığını döndürür.
+
+## V1.2 staging
+
+`render.yaml`, V1.2 için ayrı bir Render backend + PostgreSQL staging ortamı tanımlar. Kurulum ve pilot kabul adımları için `STAGING_DEPLOY.md` dosyasını kullanın.
+
+Deploy bağlantısı:
+
+https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2Fefaher%2Fterapikart-backend%2Ftree%2Fv1.2-annual-license-pwa
+
+Staging kaynakları ticari production ortamı olarak kullanılmamalıdır.
