@@ -17,6 +17,10 @@ function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
 }
 
+function cloneAdvisor(advisor) {
+  return advisor ? { ...advisor } : null;
+}
+
 function publicAdvisor(advisor) {
   if (!advisor) return null;
   return {
@@ -87,9 +91,9 @@ async function createAdvisor({ email, displayName, passwordSalt, passwordHash })
       error.code = 'EMAIL_EXISTS';
       throw error;
     }
-    memoryAdvisors.set(id, advisor);
+    memoryAdvisors.set(id, cloneAdvisor(advisor));
     memoryByEmail.set(normalizedEmail, id);
-    return advisor;
+    return cloneAdvisor(advisor);
   }
 
   try {
@@ -115,7 +119,7 @@ async function findAdvisorByEmail(email) {
   const normalizedEmail = normalizeEmail(email);
   if (!pool) {
     const id = memoryByEmail.get(normalizedEmail);
-    return id ? memoryAdvisors.get(id) : null;
+    return id ? cloneAdvisor(memoryAdvisors.get(id)) : null;
   }
   const result = await pool.query('SELECT * FROM advisors WHERE email = $1 LIMIT 1', [normalizedEmail]);
   return rowToAdvisor(result.rows[0]);
@@ -123,7 +127,7 @@ async function findAdvisorByEmail(email) {
 
 async function findAdvisorById(id) {
   if (!id) return null;
-  if (!pool) return memoryAdvisors.get(id) || null;
+  if (!pool) return cloneAdvisor(memoryAdvisors.get(id));
   const result = await pool.query('SELECT * FROM advisors WHERE id = $1 LIMIT 1', [id]);
   return rowToAdvisor(result.rows[0]);
 }
@@ -144,9 +148,9 @@ async function consumeSessionCredit(advisorId) {
   if (advisor.trialSessionsRemaining <= 0) return null;
 
   if (!pool) {
-    advisor.trialSessionsRemaining -= 1;
-    memoryAdvisors.set(advisor.id, advisor);
-    return advisor;
+    const updated = { ...advisor, trialSessionsRemaining: advisor.trialSessionsRemaining - 1 };
+    memoryAdvisors.set(updated.id, cloneAdvisor(updated));
+    return cloneAdvisor(updated);
   }
 
   const result = await pool.query(
@@ -171,13 +175,15 @@ function nextAnnualExpiry(currentExpiry) {
 async function activateAnnualLicense(advisorId) {
   const advisor = await findAdvisorById(advisorId);
   if (!advisor) return null;
-  const licenseUntil = nextAnnualExpiry(advisor.licenseUntil);
+  const updated = {
+    ...advisor,
+    plan: 'annual',
+    licenseUntil: nextAnnualExpiry(advisor.licenseUntil)
+  };
 
   if (!pool) {
-    advisor.plan = 'annual';
-    advisor.licenseUntil = licenseUntil;
-    memoryAdvisors.set(advisor.id, advisor);
-    return advisor;
+    memoryAdvisors.set(updated.id, cloneAdvisor(updated));
+    return cloneAdvisor(updated);
   }
 
   const result = await pool.query(
@@ -185,7 +191,7 @@ async function activateAnnualLicense(advisorId) {
        SET plan = 'annual', license_until = $2
      WHERE id = $1
      RETURNING *`,
-    [advisorId, licenseUntil]
+    [advisorId, updated.licenseUntil]
   );
   return rowToAdvisor(result.rows[0]);
 }
