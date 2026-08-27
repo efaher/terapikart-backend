@@ -28,7 +28,7 @@ Bu belge V1.2 yıllık profesyonel lisans sürümünün ticari pilot öncesi asg
 10. [ ] Yıllık lisansı etkinleştir ve online kullanımın tekrar açıldığını doğrula. *(Staging hesabında lisans etkinleştirme API çağrısı başarılı; `plan=annual` doğrulandı. Arayüzde kullanımın tekrar açılması bekleniyor.)*
 11. [ ] Lisans yenilemesinin mevcut bitiş tarihinin üzerine bir yıl eklediğini doğrula.
 12. [ ] Lisans hareketinin `license_events` kaydında oluştuğunu doğrula.
-13. [ ] Danışmanın uygulamayı PWA olarak kurabildiğini doğrula.
+13. [x] Danışmanın uygulamayı PWA olarak kurabildiğini doğrula. *(Android ana ekrana Persona Card olarak başarıyla kuruldu: 2026-08-27.)*
 14. [x] 121 kartı cihazda hazırla ve internet kesikken cihaz modunun açıldığını doğrula. *(121 kart önbelleğe alındı; internet kapalıyken uygulama, kart galerisi ve yerel kart seçimi çalıştı.)*
 
 ## Pilot dönemde manuel lisans verme
@@ -39,7 +39,7 @@ Yerel yönetim ortamında:
 
 ```bash
 export PERSONA_API_URL="https://API-ADRESI"
-export ADMIN_LICENSE_SECRET="HOSTINGDE-TUTULAN-SECRET"
+export ADMIN_LICENSE_SECRET="HOSTINGDE_TUTULAN_SECRET"
 npm run license:grant -- danisman@example.com
 ```
 
