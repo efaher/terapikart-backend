@@ -22,6 +22,9 @@ const {
 
 const PORT = process.env.PORT || 3001;
 const ADMIN_LICENSE_SECRET = String(process.env.ADMIN_LICENSE_SECRET || '');
+const ROOM_MAX_AGE_MS = Number(process.env.ROOM_MAX_AGE_MS || 6 * 60 * 60 * 1000);
+const ROOM_IDLE_CLEANUP_MS = Number(process.env.ROOM_IDLE_CLEANUP_MS || 30 * 60 * 1000);
+const ROOM_CLEANUP_INTERVAL_MS = Number(process.env.ROOM_CLEANUP_INTERVAL_MS || 15 * 60 * 1000);
 const DEFAULT_ORIGINS = [
   'https://personitacard.netlify.app',
   'http://localhost:5500',
@@ -80,6 +83,10 @@ function createRoomId() {
   return id;
 }
 
+function touchRoom(room) {
+  room.lastActivityAt = Date.now();
+}
+
 function publicRoomState(room) {
   return {
     roomID: room.id,
@@ -91,6 +98,7 @@ function publicRoomState(room) {
 }
 
 function emitRoomState(room) {
+  touchRoom(room);
   io.to(room.id).emit('roomState', publicRoomState(room));
 }
 
@@ -99,6 +107,30 @@ function getSocketSession(socket) {
   const room = rooms.get(socket.data.roomID);
   if (!room) return null;
   return { room, role: socket.data.role };
+}
+
+function destroyRoom(room, reason = 'closed') {
+  if (!room || !rooms.has(room.id)) return;
+
+  io.to(room.id).emit('roomClosed', { roomID: room.id, reason });
+  const socketIds = io.sockets.adapter.rooms.get(room.id);
+  if (socketIds) {
+    for (const socketId of [...socketIds]) {
+      const participant = io.sockets.sockets.get(socketId);
+      if (participant) {
+        participant.leave(room.id);
+        participant.data.roomID = null;
+        participant.data.role = null;
+      }
+    }
+  }
+  rooms.delete(room.id);
+}
+
+function destroyAdvisorRooms(advisorId) {
+  for (const room of [...rooms.values()]) {
+    if (room.advisorId === advisorId) destroyRoom(room, 'replaced');
+  }
 }
 
 function detachSocket(socket) {
@@ -113,6 +145,26 @@ function detachSocket(socket) {
   socket.data.roomID = null;
   socket.data.role = null;
   emitRoomState(room);
+}
+
+async function ensureRoomCredit(room) {
+  if (room.creditConsumed) return findAdvisorById(room.advisorId);
+  if (room.creditConsumptionPromise) return room.creditConsumptionPromise;
+
+  room.creditConsumptionPromise = (async () => {
+    const advisor = await findAdvisorById(room.advisorId);
+    if (!advisor || !canCreateSession(advisor)) return null;
+    const updatedAdvisor = await consumeSessionCredit(advisor.id);
+    if (!updatedAdvisor) return null;
+    room.creditConsumed = true;
+    return updatedAdvisor;
+  })();
+
+  try {
+    return await room.creditConsumptionPromise;
+  } finally {
+    room.creditConsumptionPromise = null;
+  }
 }
 
 function getBearerToken(req) {
@@ -253,14 +305,10 @@ io.on('connection', (socket) => {
         return;
       }
 
-      const updatedAdvisor = await consumeSessionCredit(advisor.id);
-      if (!updatedAdvisor) {
-        socket.emit('sessionError', { code: 'LICENSE_REQUIRED', message: 'Ücretsiz kullanım hakkınız sona erdi. Yıllık lisansınızı etkinleştirin.' });
-        return;
-      }
-
+      destroyAdvisorRooms(advisor.id);
       detachSocket(socket);
 
+      const now = Date.now();
       const roomID = createRoomId();
       const advisorToken = createToken();
       const clientToken = createToken();
@@ -274,7 +322,10 @@ io.on('connection', (socket) => {
         clientSocketId: null,
         selectedCards: new Map(),
         nextOrder: 1,
-        createdAt: Date.now()
+        creditConsumed: false,
+        creditConsumptionPromise: null,
+        createdAt: now,
+        lastActivityAt: now
       };
 
       rooms.set(roomID, room);
@@ -286,7 +337,7 @@ io.on('connection', (socket) => {
         ...publicRoomState(room),
         advisorToken,
         clientToken,
-        advisor: publicAdvisor(updatedAdvisor)
+        advisor: publicAdvisor(advisor)
       });
       emitRoomState(room);
     } catch (error) {
@@ -295,39 +346,68 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('joinRoom', ({ roomID, token } = {}) => {
-    const normalizedRoomID = String(roomID || '').trim().toUpperCase();
-    const room = rooms.get(normalizedRoomID);
+  socket.on('joinRoom', async ({ roomID, token } = {}) => {
+    try {
+      const normalizedRoomID = String(roomID || '').trim().toUpperCase();
+      const room = rooms.get(normalizedRoomID);
 
-    if (!room || !token) {
-      socket.emit('sessionError', { code: 'ROOM_NOT_FOUND', message: 'Oturum bulunamadı veya bağlantı geçersiz.' });
-      return;
+      if (!room || !token) {
+        socket.emit('sessionError', { code: 'ROOM_NOT_FOUND', message: 'Oturum bulunamadı veya bağlantı geçersiz.' });
+        return;
+      }
+
+      if (Date.now() - room.createdAt >= ROOM_MAX_AGE_MS) {
+        destroyRoom(room, 'expired');
+        socket.emit('sessionError', { code: 'ROOM_EXPIRED', message: 'Bu kart çalışmasının süresi dolmuş.' });
+        return;
+      }
+
+      let role = null;
+      if (token === room.advisorToken) role = 'advisor';
+      if (token === room.clientToken) role = 'client';
+
+      if (!role) {
+        socket.emit('sessionError', { code: 'INVALID_TOKEN', message: 'Bu oturum bağlantısı geçersiz.' });
+        return;
+      }
+
+      if (role === 'client') {
+        if (room.clientSocketId && room.clientSocketId !== socket.id) {
+          socket.emit('sessionError', { code: 'CLIENT_ALREADY_CONNECTED', message: 'Bu oturuma bir danışan zaten bağlı.' });
+          return;
+        }
+
+        const updatedAdvisor = await ensureRoomCredit(room);
+        if (!updatedAdvisor) {
+          socket.emit('sessionError', { code: 'SESSION_UNAVAILABLE', message: 'Bu kart çalışması şu anda kullanıma hazır değil. Danışmanınıza bilgi verin.' });
+          return;
+        }
+
+        if (room.clientSocketId && room.clientSocketId !== socket.id) {
+          socket.emit('sessionError', { code: 'CLIENT_ALREADY_CONNECTED', message: 'Bu oturuma bir danışan zaten bağlı.' });
+          return;
+        }
+
+        if (room.advisorSocketId) {
+          io.to(room.advisorSocketId).emit('advisorAccountUpdated', { advisor: publicAdvisor(updatedAdvisor) });
+        }
+      }
+
+      detachSocket(socket);
+      socket.join(room.id);
+      socket.data.roomID = room.id;
+      socket.data.role = role;
+
+      if (role === 'advisor') room.advisorSocketId = socket.id;
+      if (role === 'client') room.clientSocketId = socket.id;
+
+      touchRoom(room);
+      socket.emit('joinedRoom', { ...publicRoomState(room), role });
+      emitRoomState(room);
+    } catch (error) {
+      console.error('[joinRoom]', error);
+      socket.emit('sessionError', { code: 'SERVER_ERROR', message: 'Oturuma katılım tamamlanamadı.' });
     }
-
-    let role = null;
-    if (token === room.advisorToken) role = 'advisor';
-    if (token === room.clientToken) role = 'client';
-
-    if (!role) {
-      socket.emit('sessionError', { code: 'INVALID_TOKEN', message: 'Bu oturum bağlantısı geçersiz.' });
-      return;
-    }
-
-    if (role === 'client' && room.clientSocketId && room.clientSocketId !== socket.id) {
-      socket.emit('sessionError', { code: 'CLIENT_ALREADY_CONNECTED', message: 'Bu oturuma bir danışan zaten bağlı.' });
-      return;
-    }
-
-    detachSocket(socket);
-    socket.join(room.id);
-    socket.data.roomID = room.id;
-    socket.data.role = role;
-
-    if (role === 'advisor') room.advisorSocketId = socket.id;
-    if (role === 'client') room.clientSocketId = socket.id;
-
-    socket.emit('joinedRoom', { ...publicRoomState(room), role });
-    emitRoomState(room);
   });
 
   socket.on('selectCard', ({ cardId } = {}) => {
@@ -384,22 +464,7 @@ io.on('connection', (socket) => {
       socket.emit('sessionError', { code: 'NOT_ALLOWED', message: 'Oturumu yalnızca danışman kapatabilir.' });
       return;
     }
-
-    const { room } = session;
-    io.to(room.id).emit('roomClosed', { roomID: room.id });
-    rooms.delete(room.id);
-
-    const sockets = io.sockets.adapter.rooms.get(room.id);
-    if (sockets) {
-      for (const socketId of sockets) {
-        const participant = io.sockets.sockets.get(socketId);
-        if (participant) {
-          participant.leave(room.id);
-          participant.data.roomID = null;
-          participant.data.role = null;
-        }
-      }
-    }
+    destroyRoom(session.room, 'closed');
   });
 
   socket.on('leaveRoom', () => detachSocket(socket));
@@ -413,6 +478,18 @@ io.on('connection', (socket) => {
     emitRoomState(room);
   });
 });
+
+const cleanupTimer = setInterval(() => {
+  const now = Date.now();
+  for (const room of [...rooms.values()]) {
+    const tooOld = now - room.createdAt >= ROOM_MAX_AGE_MS;
+    const abandoned = !room.advisorSocketId
+      && !room.clientSocketId
+      && now - room.lastActivityAt >= ROOM_IDLE_CLEANUP_MS;
+    if (tooOld || abandoned) destroyRoom(room, 'expired');
+  }
+}, ROOM_CLEANUP_INTERVAL_MS);
+cleanupTimer.unref();
 
 initStorage()
   .then(() => {
