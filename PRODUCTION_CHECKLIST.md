@@ -29,7 +29,7 @@ Bu belge V1.2 yıllık profesyonel lisans sürümünün ticari pilot öncesi asg
 11. [ ] Lisans yenilemesinin mevcut bitiş tarihinin üzerine bir yıl eklediğini doğrula.
 12. [ ] Lisans hareketinin `license_events` kaydında oluştuğunu doğrula.
 13. [ ] Danışmanın uygulamayı PWA olarak kurabildiğini doğrula.
-14. [ ] 121 kartı cihazda hazırla ve internet kesikken cihaz modunun açıldığını doğrula.
+14. [x] 121 kartı cihazda hazırla ve internet kesikken cihaz modunun açıldığını doğrula. *(121 kart önbelleğe alındı; internet kapalıyken uygulama, kart galerisi ve yerel kart seçimi çalıştı.)*
 
 ## Pilot dönemde manuel lisans verme
 
