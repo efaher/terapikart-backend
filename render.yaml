@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: persona-card-v12-staging-efaher
+    runtime: node
+    plan: free
+    region: frankfurt
+    repo: https://github.com/efaher/terapikart-backend
+    branch: v1.2-annual-license-pwa
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    autoDeployTrigger: checksPass
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: staging
+      - key: DATABASE_URL
+        fromDatabase:
+          name: persona-card-v12-staging-db
+          property: connectionString
+      - key: DATABASE_SSL
+        value: "false"
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: ADMIN_LICENSE_SECRET
+        generateValue: true
+      - key: ALLOWED_ORIGINS
+        value: https://personitacard.netlify.app,https://deploy-preview-3--personitacard.netlify.app,https://kart.efia.net.tr
+      - key: ROOM_MAX_AGE_MS
+        value: "21600000"
+      - key: ROOM_IDLE_CLEANUP_MS
+        value: "1800000"
+      - key: ROOM_CLEANUP_INTERVAL_MS
+        value: "900000"
+
+databases:
+  - name: persona-card-v12-staging-db
+    plan: free
+    region: frankfurt
+    databaseName: personacard_staging
+    user: personacard_staging
