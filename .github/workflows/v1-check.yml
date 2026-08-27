@@ -22,3 +22,5 @@ jobs:
         run: npm run check
       - name: Test annual license behavior
         run: npm test
+      - name: Validate Render Blueprint YAML
+        run: ruby -e "require 'yaml'; YAML.load_file('render.yaml'); puts 'render.yaml ok'"
