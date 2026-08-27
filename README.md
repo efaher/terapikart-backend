@@ -1,31 +1,48 @@
 # Persona Card Realtime Backend
 
-Bu servis Persona Card V1 için danışman-danışan kart çalışma oturumlarını gerçek zamanlı yönetir.
+Bu servis Persona Card'ın danışman hesaplarını, yıllık profesyonel lisans durumunu ve danışman-danışan kart çalışma oturumlarını yönetir.
 
-## V1 rol modeli
+## V1.2 ticari model
 
-- **Danışman:** oturum oluşturur, danışan bağlantısını paylaşır, seçimleri sıfırlar ve oturumu kapatır.
-- **Danışan:** güvenli bağlantı ile oturuma katılır, kart seçer ve kendi seçimlerini kaldırır.
+- Yeni danışman hesabı: 3 ücretsiz çevrimiçi çalışma.
+- Ticari plan: `annual` yıllık profesyonel lisans.
+- Aktif yıllık lisans boyunca çevrimiçi oturum oluşturma sınırı yoktur.
+- Yenileme, mevcut lisans süresi bitmemişse bitiş tarihinin üzerine bir yıl ekler.
+- Aylık, lifetime veya founder planları V1.2 ticari modelinin parçası değildir.
 
-Danışman kart seçemez; danışan oturumu sıfırlayamaz veya kapatamaz.
+## Rol modeli
 
-## Güvenli oturum bağlantısı
+- **Danışman:** hesapla giriş yapar, oturum oluşturur, danışan bağlantısını paylaşır, seçimleri sıfırlar ve oturumu kapatır.
+- **Danışan:** hesap açmadan güvenli bağlantıyla katılır, kart seçer ve seçimini kaldırır.
 
-Her oturum için ayrı danışman ve danışan tokenı üretilir. Oda kodu tek başına katılım için yeterli değildir.
+## Lisans etkinleştirme
+
+Ödeme entegrasyonu bağlanana kadar yıllık lisans yalnızca sunucu tarafındaki yönetim anahtarıyla etkinleştirilebilir:
+
+`POST /api/admin/licenses/annual`
+
+İstek `Authorization: Bearer <ADMIN_LICENSE_SECRET>` başlığını ve danışman `email` alanını içerir. Bu endpoint son kullanıcı arayüzüne açılmaz. İleride ödeme sağlayıcısının başarılı ödeme webhook'u aynı lisans fonksiyonunu çağıracaktır.
 
 ## Veri yaklaşımı
 
-V1'de oda ve kart seçimi bilgileri yalnızca sunucu belleğinde tutulur. Sunucu yeniden başlatıldığında oturumlar silinir. Bu bilinçli bir V1 tercihidir; kalıcı kullanıcı/lisans verileri ilerleyen ticari aşamada veritabanına taşınacaktır.
-
-Kartların herhangi bir psikolojik anlamı veya yorum verisi backend üzerinde tutulmaz.
+- Danışman hesapları ve lisans süreleri PostgreSQL üzerinde kalıcı tutulur.
+- Aktif kart çalışma odaları geçici bellekte tutulur; sunucu yeniden başladığında aktif odalar sonlanır.
+- Danışana ait hesap, terapi notu, tanı veya psikolojik profil verisi tutulmaz.
+- Kartlara herhangi bir psikolojik anlam veya otomatik yorum backend tarafından atanmaz.
 
 ## Ortam değişkenleri
 
-- `PORT`: servis portu
-- `ALLOWED_ORIGINS`: virgülle ayrılmış izinli frontend origin listesi
+- `PORT`
+- `ALLOWED_ORIGINS`
+- `DATABASE_URL`
+- `DATABASE_SSL`
+- `AUTH_SECRET`
+- `ADMIN_LICENSE_SECRET`
+
+Üretimde `DATABASE_URL`, `AUTH_SECRET` ve `ADMIN_LICENSE_SECRET` mutlaka kalıcı ve güvenli değerlerle tanımlanmalıdır.
 
 ## Health endpoint
 
 `GET /health`
 
-Servisin çalıştığını ve bellekteki aktif oda sayısını döndürür.
+Servisin çalışmasını, aktif oda sayısını ve kalıcı hesap veritabanının bağlı olup olmadığını döndürür.
