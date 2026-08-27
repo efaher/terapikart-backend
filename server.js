@@ -16,10 +16,12 @@ const {
   publicAdvisor,
   canCreateSession,
   consumeSessionCredit,
+  activateAnnualLicense,
   hasDatabase
 } = require('./storage');
 
 const PORT = process.env.PORT || 3001;
+const ADMIN_LICENSE_SECRET = String(process.env.ADMIN_LICENSE_SECRET || '');
 const DEFAULT_ORIGINS = [
   'https://personitacard.netlify.app',
   'http://localhost:5500',
@@ -128,10 +130,19 @@ function validEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
 }
 
+function adminAuthorized(req) {
+  if (!ADMIN_LICENSE_SECRET) return false;
+  const provided = getBearerToken(req);
+  if (!provided) return false;
+  const left = Buffer.from(provided);
+  const right = Buffer.from(ADMIN_LICENSE_SECRET);
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
+
 app.get('/', (req, res) => {
   res.json({
     name: 'Persona Card realtime backend',
-    version: '1.1-advisor-accounts',
+    version: '1.2-annual-license-pwa',
     status: 'ok',
     persistentAccounts: hasDatabase
   });
@@ -199,6 +210,30 @@ app.get('/api/me', async (req, res) => {
   }
 });
 
+app.post('/api/admin/licenses/annual', async (req, res) => {
+  try {
+    if (!adminAuthorized(req)) {
+      return res.status(401).json({ code: 'UNAUTHORIZED', message: 'Lisans yönetim yetkisi doğrulanamadı.' });
+    }
+
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!validEmail(email)) {
+      return res.status(400).json({ code: 'INVALID_EMAIL', message: 'Geçerli bir danışman e-postası girin.' });
+    }
+
+    const advisor = await findAdvisorByEmail(email);
+    if (!advisor) {
+      return res.status(404).json({ code: 'ADVISOR_NOT_FOUND', message: 'Danışman hesabı bulunamadı.' });
+    }
+
+    const updated = await activateAnnualLicense(advisor.id);
+    return res.json({ advisor: publicAdvisor(updated) });
+  } catch (error) {
+    console.error('[annual-license]', error);
+    return res.status(500).json({ code: 'SERVER_ERROR', message: 'Yıllık lisans etkinleştirilemedi.' });
+  }
+});
+
 io.on('connection', (socket) => {
   socket.on('createRoom', async ({ cardSet, authToken } = {}) => {
     try {
@@ -214,13 +249,13 @@ io.on('connection', (socket) => {
       }
 
       if (!canCreateSession(advisor)) {
-        socket.emit('sessionError', { code: 'LICENSE_REQUIRED', message: 'Ücretsiz kullanım hakkınız sona erdi. Lisansınızı etkinleştirin.' });
+        socket.emit('sessionError', { code: 'LICENSE_REQUIRED', message: 'Ücretsiz kullanım hakkınız sona erdi. Yıllık lisansınızı etkinleştirin.' });
         return;
       }
 
       const updatedAdvisor = await consumeSessionCredit(advisor.id);
       if (!updatedAdvisor) {
-        socket.emit('sessionError', { code: 'LICENSE_REQUIRED', message: 'Ücretsiz kullanım hakkınız sona erdi. Lisansınızı etkinleştirin.' });
+        socket.emit('sessionError', { code: 'LICENSE_REQUIRED', message: 'Ücretsiz kullanım hakkınız sona erdi. Yıllık lisansınızı etkinleştirin.' });
         return;
       }
 
