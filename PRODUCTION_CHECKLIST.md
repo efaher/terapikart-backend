@@ -11,7 +11,7 @@ Bu belge V1.2 yıllık profesyonel lisans sürümünün ticari pilot öncesi asg
 - [ ] `ALLOWED_ORIGINS` üretim frontend adreslerini içeriyor.
 - [ ] HTTPS ve WebSocket bağlantısı gerçek üretim adresinden doğrulandı.
 - [x] `/health` yanıtında `persistentAccounts: true` görülüyor. *(Staging: 2026-08-27.)*
-- [ ] Sunucu yeniden başlatıldıktan sonra danışman hesabı ve lisans bilgisi korunuyor.
+- [ ] Sunucu yeniden başlatıldıktan sonra danışman hesabı ve lisans bilgisi korunuyor. *(Farklı tarayıcıdan Brave ile giriş başarılı; hesabın tarayıcıya bağımlı olmadığı doğrulandı. Gerçek sunucu restart testi ayrıca yapılacak.)*
 - [ ] Veritabanı için düzenli yedek/geri yükleme yöntemi doğrulandı.
 
 ## Pilot kabul senaryosu
