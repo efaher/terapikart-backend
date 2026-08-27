@@ -16,20 +16,20 @@ Bu belge V1.2 yıllık profesyonel lisans sürümünün ticari pilot öncesi asg
 
 ## Pilot kabul senaryosu
 
-1. Yeni danışman hesabı oluştur.
-2. Hesabın 3 ücretsiz çalışma ile başladığını doğrula.
-3. Danışan katılmadan oda açıp kapat; ücretsiz hakkın düşmediğini doğrula.
-4. Danışana link gönder ve ikinci cihazdan katıl.
-5. Danışan katıldığında ücretsiz hakkın yalnız bir kez düştüğünü doğrula.
-6. Kart seçiminin danışman ekranına gerçek zamanlı düştüğünü doğrula.
-7. Danışanın seçimi kaldırabildiğini doğrula.
-8. Danışmanın kart seçemediğini; danışanın oturumu sıfırlayıp kapatamadığını doğrula.
-9. Üç gerçek danışan katılımından sonra yeni online çalışma oluşturmanın engellendiğini doğrula.
-10. Yıllık lisansı etkinleştir ve online kullanımın tekrar açıldığını doğrula.
-11. Lisans yenilemesinin mevcut bitiş tarihinin üzerine bir yıl eklediğini doğrula.
-12. Lisans hareketinin `license_events` kaydında oluştuğunu doğrula.
-13. Danışmanın uygulamayı PWA olarak kurabildiğini doğrula.
-14. 121 kartı cihazda hazırla ve internet kesikken cihaz modunun açıldığını doğrula.
+1. [x] Yeni danışman hesabı oluştur. *(Gerçek staging testi: 2026-08-27.)*
+2. [x] Hesabın 3 ücretsiz çalışma ile başladığını doğrula.
+3. [ ] Danışan katılmadan oda açıp kapat; ücretsiz hakkın düşmediğini doğrula.
+4. [x] Danışana link gönder ve ikinci cihazdan katıl.
+5. [x] Danışan katıldığında ücretsiz hakkın yalnız bir kez düştüğünü doğrula. *(3 → 2 gözlendi.)*
+6. [x] Kart seçiminin danışman ekranına gerçek zamanlı düştüğünü doğrula.
+7. [ ] Danışanın seçimi kaldırabildiğini doğrula.
+8. [ ] Danışmanın kart seçemediğini; danışanın oturumu sıfırlayıp kapatamadığını doğrula.
+9. [ ] Üç gerçek danışan katılımından sonra yeni online çalışma oluşturmanın engellendiğini doğrula.
+10. [ ] Yıllık lisansı etkinleştir ve online kullanımın tekrar açıldığını doğrula.
+11. [ ] Lisans yenilemesinin mevcut bitiş tarihinin üzerine bir yıl eklediğini doğrula.
+12. [ ] Lisans hareketinin `license_events` kaydında oluştuğunu doğrula.
+13. [ ] Danışmanın uygulamayı PWA olarak kurabildiğini doğrula.
+14. [ ] 121 kartı cihazda hazırla ve internet kesikken cihaz modunun açıldığını doğrula.
 
 ## Pilot dönemde manuel lisans verme
 
