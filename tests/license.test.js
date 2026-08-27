@@ -3,7 +3,8 @@ const {
   createAdvisor,
   canCreateSession,
   consumeSessionCredit,
-  activateAnnualLicense
+  activateAnnualLicense,
+  listLicenseEvents
 } = require('../storage');
 
 async function run() {
@@ -29,17 +30,26 @@ async function run() {
   assert.strictEqual(afterThree.trialSessionsRemaining, 0);
   assert.strictEqual(afterFour, null);
 
-  const licensed = await activateAnnualLicense(advisor.id);
+  const licensed = await activateAnnualLicense(advisor.id, { source: 'test-first', reference: 'TEST-ORDER-1' });
   assert.strictEqual(licensed.plan, 'annual');
   assert.ok(new Date(licensed.licenseUntil).getTime() > Date.now());
   assert.strictEqual(canCreateSession(licensed), true);
 
   const firstExpiry = new Date(licensed.licenseUntil).getTime();
-  const renewed = await activateAnnualLicense(advisor.id);
+  const renewed = await activateAnnualLicense(advisor.id, { source: 'test-renewal', reference: 'TEST-ORDER-2' });
   const renewedExpiry = new Date(renewed.licenseUntil).getTime();
   assert.ok(renewedExpiry > firstExpiry);
 
-  console.log('annual license tests passed');
+  const history = await listLicenseEvents(advisor.id);
+  assert.strictEqual(history.length, 2);
+  assert.strictEqual(history[0].source, 'test-renewal');
+  assert.strictEqual(history[0].reference, 'TEST-ORDER-2');
+  assert.strictEqual(history[1].source, 'test-first');
+  assert.strictEqual(history[1].reference, 'TEST-ORDER-1');
+  assert.strictEqual(history[1].previousLicenseUntil, null);
+  assert.strictEqual(history[1].newLicenseUntil, licensed.licenseUntil);
+
+  console.log('annual license and audit history tests passed');
 }
 
 run().catch((error) => {
