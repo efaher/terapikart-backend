@@ -4,13 +4,13 @@ Bu belge V1.2 yıllık profesyonel lisans sürümünün ticari pilot öncesi asg
 
 ## Main'e birleştirmeden önce zorunlu
 
-- [ ] Kalıcı PostgreSQL veritabanı oluşturuldu.
-- [ ] `DATABASE_URL` yalnız hosting ortamında secret olarak tanımlandı.
-- [ ] Uzun ve rastgele `AUTH_SECRET` yalnız hosting ortamında tanımlandı.
-- [ ] Ayrı ve uzun `ADMIN_LICENSE_SECRET` yalnız hosting ortamında tanımlandı.
+- [x] Kalıcı PostgreSQL veritabanı oluşturuldu. *(Staging doğrulandı.)*
+- [x] `DATABASE_URL` yalnız hosting ortamında secret olarak tanımlandı. *(Render Blueprint ile bağlı.)*
+- [x] Uzun ve rastgele `AUTH_SECRET` yalnız hosting ortamında tanımlandı. *(Render tarafından üretildi.)*
+- [x] Ayrı ve uzun `ADMIN_LICENSE_SECRET` yalnız hosting ortamında tanımlandı. *(Render tarafından üretildi.)*
 - [ ] `ALLOWED_ORIGINS` üretim frontend adreslerini içeriyor.
 - [ ] HTTPS ve WebSocket bağlantısı gerçek üretim adresinden doğrulandı.
-- [ ] `/health` yanıtında `persistentAccounts: true` görülüyor.
+- [x] `/health` yanıtında `persistentAccounts: true` görülüyor. *(Staging: 2026-08-27.)*
 - [ ] Sunucu yeniden başlatıldıktan sonra danışman hesabı ve lisans bilgisi korunuyor.
 - [ ] Veritabanı için düzenli yedek/geri yükleme yöntemi doğrulandı.
 
