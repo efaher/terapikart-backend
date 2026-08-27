@@ -129,12 +129,8 @@ async function findAdvisorById(id) {
 }
 
 function hasActiveLicense(advisor) {
-  if (!advisor) return false;
-  if (['founder', 'lifetime'].includes(advisor.plan)) return true;
-  if (advisor.plan === 'annual' && advisor.licenseUntil) {
-    return new Date(advisor.licenseUntil).getTime() > Date.now();
-  }
-  return false;
+  if (!advisor || advisor.plan !== 'annual' || !advisor.licenseUntil) return false;
+  return new Date(advisor.licenseUntil).getTime() > Date.now();
 }
 
 function canCreateSession(advisor) {
@@ -163,6 +159,37 @@ async function consumeSessionCredit(advisorId) {
   return rowToAdvisor(result.rows[0]);
 }
 
+function nextAnnualExpiry(currentExpiry) {
+  const now = Date.now();
+  const existing = currentExpiry ? new Date(currentExpiry).getTime() : 0;
+  const base = Number.isFinite(existing) && existing > now ? existing : now;
+  const expiry = new Date(base);
+  expiry.setUTCFullYear(expiry.getUTCFullYear() + 1);
+  return expiry.toISOString();
+}
+
+async function activateAnnualLicense(advisorId) {
+  const advisor = await findAdvisorById(advisorId);
+  if (!advisor) return null;
+  const licenseUntil = nextAnnualExpiry(advisor.licenseUntil);
+
+  if (!pool) {
+    advisor.plan = 'annual';
+    advisor.licenseUntil = licenseUntil;
+    memoryAdvisors.set(advisor.id, advisor);
+    return advisor;
+  }
+
+  const result = await pool.query(
+    `UPDATE advisors
+       SET plan = 'annual', license_until = $2
+     WHERE id = $1
+     RETURNING *`,
+    [advisorId, licenseUntil]
+  );
+  return rowToAdvisor(result.rows[0]);
+}
+
 module.exports = {
   initStorage,
   createAdvisor,
@@ -171,5 +198,7 @@ module.exports = {
   publicAdvisor,
   canCreateSession,
   consumeSessionCredit,
+  activateAnnualLicense,
+  hasActiveLicense,
   hasDatabase
 };
