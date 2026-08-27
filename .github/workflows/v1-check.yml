@@ -2,7 +2,7 @@ name: Persona Card Backend Checks
 
 on:
   push:
-    branches: [v1.1-advisor-accounts]
+    branches: [v1.2-annual-license-pwa]
   pull_request:
     branches: [main]
 
