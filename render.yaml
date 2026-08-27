@@ -38,3 +38,4 @@ databases:
     region: frankfurt
     databaseName: personacard_staging
     user: personacard_staging
+    ipAllowList: []
