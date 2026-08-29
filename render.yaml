@@ -31,6 +31,8 @@ services:
         value: "1800000"
       - key: ROOM_CLEANUP_INTERVAL_MS
         value: "900000"
+      - key: MAIL_PROVIDER
+        value: resend
       - key: SMTP_HOST
         value: mail.efia.net.tr
       - key: SMTP_PORT
