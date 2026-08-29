@@ -1,0 +1,44 @@
+# PRODUCTION TEMPLATE — Bu dosya otomatik olarak deploy edilmez.
+# Ücretli kaynak oluşturur; Render'da çalıştırmadan önce maliyet onayı alınmalıdır.
+services:
+  - type: web
+    name: persona-card-production
+    runtime: node
+    plan: 0.5c-512mb
+    region: frankfurt
+    repo: https://github.com/efaher/terapikart-backend
+    branch: v1.2-annual-license-pwa
+    buildCommand: npm install --omit=dev --no-audit --no-fund
+    startCommand: npm start
+    autoDeployTrigger: checksPass
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: persona-card-production-db
+          property: connectionString
+      - key: DATABASE_SSL
+        value: "false"
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: ADMIN_LICENSE_SECRET
+        generateValue: true
+      - key: ALLOWED_ORIGINS
+        value: https://personitacard.netlify.app,https://kart.efia.net.tr
+      - key: ROOM_MAX_AGE_MS
+        value: "21600000"
+      - key: ROOM_IDLE_CLEANUP_MS
+        value: "1800000"
+      - key: ROOM_CLEANUP_INTERVAL_MS
+        value: "900000"
+
+databases:
+  - name: persona-card-production-db
+    plan: basic-256mb
+    region: frankfurt
+    databaseName: personacard_production
+    user: personacard_production
+    diskSizeGB: 1
+    ipAllowList: []
