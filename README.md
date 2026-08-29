@@ -7,52 +7,88 @@ Bu servis Persona Card'ın danışman hesaplarını, yıllık profesyonel lisans
 - Yeni danışman hesabı: 3 ücretsiz çevrimiçi çalışma.
 - Ticari plan: `annual` yıllık profesyonel lisans.
 - Aktif yıllık lisans boyunca çevrimiçi oturum oluşturma sınırı yoktur.
-- Yenileme, mevcut lisans süresi bitmemişse bitiş tarihinin üzerine bir yıl ekler.
-- Aylık, lifetime veya founder planları V1.2 ticari modelinin parçası değildir.
+- Yenileme, mevcut lisans süresi bitmemişse mevcut bitiş tarihinin üzerine 1 yıl ekler.
+- Danışan hesap açmaz; yalnızca geçici güvenli oturum bağlantısından katılır.
 
-## Rol modeli
+## Güvenlik omurgası
 
-- **Danışman:** hesapla giriş yapar, oturum oluşturur, danışan bağlantısını paylaşır, seçimleri sıfırlar ve oturumu kapatır.
-- **Danışan:** hesap açmadan güvenli bağlantıyla katılır, kart seçer ve seçimini kaldırır.
+- Danışman parolaları `scrypt` ile hashlenir.
+- Auth tokenları imzalı ve süreli olarak üretilir.
+- `ADMIN_LICENSE_SECRET` yalnız backend ortamında tutulur.
+- Login/register/admin lisans endpointleri uygulama-seviyesi rate limit ile korunur.
+- Render üzerinde rate-limit istemci anahtarı için `CF-Connecting-IP` önceliklidir.
+- Limit aşımında `429 RATE_LIMITED` ve `Retry-After` döner.
+- Danışan/oda yetkileri Socket.IO tarafında rol bazlı uygulanır.
+- PostgreSQL varsa hesap ve lisans verileri kalıcıdır.
+- Yıllık lisans değişiklikleri `license_events` audit tablosuna aynı transaction içinde yazılır.
 
-## Lisans etkinleştirme
+Varsayılan rate-limit değerleri:
 
-Ödeme entegrasyonu bağlanana kadar yıllık lisans yalnızca sunucu tarafındaki yönetim anahtarıyla etkinleştirilebilir:
+- auth IP: 15 dakika / 60 istek
+- login IP+e-posta: 15 dakika / 10 istek
+- register IP: 15 dakika / 8 istek
+- admin lisans IP: 15 dakika / 10 istek
 
-`POST /api/admin/licenses/annual`
+Bu değerler `.env.example` içindeki environment variable'larla değiştirilebilir.
 
-İstek `Authorization: Bearer <ADMIN_LICENSE_SECRET>` başlığını ve danışman `email` alanını içerir. Bu endpoint son kullanıcı arayüzüne açılmaz. İleride ödeme sağlayıcısının başarılı ödeme webhook'u aynı lisans fonksiyonunu çağıracaktır.
+## Deneme hakkı kuralı
 
-## Veri yaklaşımı
+Ücretsiz kullanım oda oluşturulduğunda değil, danışan ilgili odaya ilk kez gerçekten katıldığında tüketilir. Danışan katılmadan açılıp kapatılan odalar deneme hakkı düşürmez.
 
-- Danışman hesapları ve lisans süreleri PostgreSQL üzerinde kalıcı tutulur.
-- Aktif kart çalışma odaları geçici bellekte tutulur; sunucu yeniden başladığında aktif odalar sonlanır.
-- Danışana ait hesap, terapi notu, tanı veya psikolojik profil verisi tutulmaz.
-- Kartlara herhangi bir psikolojik anlam veya otomatik yorum backend tarafından atanmaz.
+## Oda yaşam döngüsü
 
-## Ortam değişkenleri
+Varsayılanlar:
 
-- `PORT`
-- `ALLOWED_ORIGINS`
-- `DATABASE_URL`
-- `DATABASE_SSL`
-- `AUTH_SECRET`
-- `ADMIN_LICENSE_SECRET`
+- oda azami ömrü: 6 saat
+- iki taraf da ayrıldıktan sonra boş oda temizleme: 30 dakika
+- temizlik kontrolü: 15 dakika
+- bir danışmanın aynı anda yalnız bir aktif odası bulunur
 
-Üretimde `DATABASE_URL`, `AUTH_SECRET` ve `ADMIN_LICENSE_SECRET` mutlaka kalıcı ve güvenli değerlerle tanımlanmalıdır.
+Yeni bir oda açılırsa aynı danışmana ait önceki oda `replaced` nedeni ile kapatılır.
 
-## Health endpoint
+## Yerel çalıştırma
 
-`GET /health`
+```bash
+npm install
+npm test
+npm start
+```
 
-Servisin çalışmasını, aktif oda sayısını ve kalıcı hesap veritabanının bağlı olup olmadığını döndürür.
+Kalıcı hesaplar için `DATABASE_URL` gerekir. Ortam değişkenleri `.env.example` içinde listelenmiştir.
 
-## V1.2 staging
+## Sağlık kontrolü
 
-`render.yaml`, V1.2 için ayrı bir Render backend + PostgreSQL staging ortamı tanımlar. Kurulum ve pilot kabul adımları için `STAGING_DEPLOY.md` dosyasını kullanın.
+```text
+GET /health
+```
 
-Deploy bağlantısı:
+PostgreSQL bağlı üretim/staging ortamında beklenen alan:
 
-https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2Fefaher%2Fterapikart-backend%2Ftree%2Fv1.2-annual-license-pwa
+```json
+{
+  "ok": true,
+  "persistentAccounts": true
+}
+```
 
-Staging kaynakları ticari production ortamı olarak kullanılmamalıdır.
+## Manuel yıllık lisans
+
+Ödeme entegrasyonu tamamlanana kadar yıllık lisans yalnız yönetici secret'ı ile verilebilir:
+
+```bash
+export PERSONA_API_URL="https://API-ADRESI"
+export ADMIN_LICENSE_SECRET="HOSTINGDE_TUTULAN_SECRET"
+npm run license:grant -- danisman@example.com
+```
+
+Secret GitHub'a, frontend'e veya kullanıcıya verilmez.
+
+## Staging / production
+
+- `render.yaml`: ücretsiz staging Blueprint.
+- `render.production.example.yaml`: ücretli production şablonu; otomatik kullanılmaz.
+- `STAGING_DEPLOY.md`: staging kurulumu.
+- `PRODUCTION_CHECKLIST.md`: pilot ve production kabul kontrolleri.
+- `PRODUCTION_DEPLOY.md`: güvenli production cutover sırası.
+
+Ücretsiz Render PostgreSQL ticari production için kullanılmaz.
