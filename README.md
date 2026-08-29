@@ -21,6 +21,8 @@ Bu servis Persona Card'ın danışman hesaplarını, yıllık profesyonel lisans
 - Danışan/oda yetkileri Socket.IO tarafında rol bazlı uygulanır.
 - PostgreSQL varsa hesap ve lisans verileri kalıcıdır.
 - Yıllık lisans değişiklikleri `license_events` audit tablosuna aynı transaction içinde yazılır.
+- Aktif yıllık lisans için en fazla 30 günlük Ed25519 imzalı çevrimdışı entitlement üretilebilir.
+- Lisans hareketleri yalnız `ADMIN_LICENSE_SECRET` ile korunan salt-okunur admin endpointinden okunabilir.
 
 Varsayılan rate-limit değerleri:
 
@@ -82,6 +84,36 @@ npm run license:grant -- danisman@example.com
 ```
 
 Secret GitHub'a, frontend'e veya kullanıcıya verilmez.
+
+## Lisans hareketlerini görüntüleme
+
+Salt-okunur yönetim endpointi:
+
+```text
+GET /api/admin/licenses/events?email=danisman@example.com&limit=20
+Authorization: Bearer ADMIN_LICENSE_SECRET
+```
+
+Komut satırından aynı sorgu:
+
+```bash
+export PERSONA_API_URL="https://API-ADRESI"
+export ADMIN_LICENSE_SECRET="HOSTINGDE_TUTULAN_SECRET"
+npm run license:events -- danisman@example.com 20
+```
+
+Yanıt yalnız danışmanın public hesap alanlarını ve lisans audit eventlerini içerir; parola salt/hash alanları dönmez. `limit` en fazla 100 olabilir.
+
+## Çevrimdışı cihaz yetkisi
+
+Aktif yıllık lisanslı danışman, oturum açmışken aşağıdaki endpointten imzalı cihaz yetkisi alabilir:
+
+```text
+GET /api/offline-entitlement
+Authorization: Bearer AUTH_TOKEN
+```
+
+Yetki en fazla 30 gün geçerlidir ve yıllık lisans bitiş tarihini aşamaz. Frontend imzayı Web Crypto ile doğrular; yerel `plan=annual` kaydı tek başına cihaz modunu açamaz.
 
 ## Staging / production
 
