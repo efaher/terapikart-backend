@@ -4,7 +4,7 @@ const SMTP_HOST = String(process.env.SMTP_HOST || '').trim();
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
 const SMTP_SECURE = String(process.env.SMTP_SECURE || '').trim().toLowerCase() === 'true';
 const SMTP_USER = String(process.env.SMTP_USER || '').trim();
-const SMTP_PASS = String(process.env.SMTP_PASS || '');
+const SMTP_PASS = String(process.env.SMTP_PASSWORD || process.env.SMTP_PASS || '');
 const MAIL_FROM = String(process.env.MAIL_FROM || SMTP_USER || '').trim();
 const FRONTEND_URL = String(process.env.FRONTEND_URL || '').replace(/\/$/, '');
 
