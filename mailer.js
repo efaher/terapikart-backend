@@ -12,6 +12,15 @@ function mailConfigured() {
   return Boolean(SMTP_HOST && SMTP_PORT && SMTP_USER && SMTP_PASS && MAIL_FROM && FRONTEND_URL);
 }
 
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 let transporter = null;
 function getTransporter() {
   if (!mailConfigured()) {
@@ -24,7 +33,11 @@ function getTransporter() {
       host: SMTP_HOST,
       port: SMTP_PORT,
       secure: SMTP_SECURE,
-      auth: { user: SMTP_USER, pass: SMTP_PASS }
+      requireTLS: !SMTP_SECURE,
+      auth: { user: SMTP_USER, pass: SMTP_PASS },
+      tls: { minVersion: 'TLSv1.2' },
+      disableFileAccess: true,
+      disableUrlAccess: true
     });
   }
   return transporter;
@@ -40,23 +53,25 @@ function fragmentUrl(key, token) {
 
 async function sendEmailVerification({ email, displayName, token }) {
   const link = fragmentUrl('verify-email', token);
+  const safeName = escapeHtml(displayName || 'Merhaba');
   await getTransporter().sendMail({
     from: MAIL_FROM,
     to: email,
     subject: 'Persona Card e-posta doğrulama',
     text: `${displayName || 'Merhaba'},\n\nPersona Card hesabınızın e-posta adresini doğrulamak için aşağıdaki bağlantıyı açın:\n${link}\n\nBu bağlantı 24 saat geçerlidir. Bu isteği siz yapmadıysanız mesajı yok sayabilirsiniz.`,
-    html: `<p>${displayName || 'Merhaba'},</p><p>Persona Card hesabınızın e-posta adresini doğrulamak için aşağıdaki bağlantıyı açın:</p><p><a href="${link}">E-posta adresimi doğrula</a></p><p>Bu bağlantı 24 saat geçerlidir. Bu isteği siz yapmadıysanız mesajı yok sayabilirsiniz.</p>`
+    html: `<p>${safeName},</p><p>Persona Card hesabınızın e-posta adresini doğrulamak için aşağıdaki bağlantıyı açın:</p><p><a href="${escapeHtml(link)}">E-posta adresimi doğrula</a></p><p>Bu bağlantı 24 saat geçerlidir. Bu isteği siz yapmadıysanız mesajı yok sayabilirsiniz.</p>`
   });
 }
 
 async function sendPasswordReset({ email, displayName, token }) {
   const link = fragmentUrl('reset-password', token);
+  const safeName = escapeHtml(displayName || 'Merhaba');
   await getTransporter().sendMail({
     from: MAIL_FROM,
     to: email,
     subject: 'Persona Card şifre sıfırlama',
     text: `${displayName || 'Merhaba'},\n\nPersona Card şifrenizi sıfırlamak için aşağıdaki bağlantıyı açın:\n${link}\n\nBu bağlantı 60 dakika geçerlidir. Bu isteği siz yapmadıysanız mesajı yok sayabilirsiniz.`,
-    html: `<p>${displayName || 'Merhaba'},</p><p>Persona Card şifrenizi sıfırlamak için aşağıdaki bağlantıyı açın:</p><p><a href="${link}">Şifremi sıfırla</a></p><p>Bu bağlantı 60 dakika geçerlidir. Bu isteği siz yapmadıysanız mesajı yok sayabilirsiniz.</p>`
+    html: `<p>${safeName},</p><p>Persona Card şifrenizi sıfırlamak için aşağıdaki bağlantıyı açın:</p><p><a href="${escapeHtml(link)}">Şifremi sıfırla</a></p><p>Bu bağlantı 60 dakika geçerlidir. Bu isteği siz yapmadıysanız mesajı yok sayabilirsiniz.</p>`
   });
 }
 
