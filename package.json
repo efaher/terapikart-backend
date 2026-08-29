@@ -6,8 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "check": "node --check server.js && node --check auth.js && node --check storage.js && node --check rate-limit.js && node --check tests/license.test.js && node --check tests/rate-limit.test.js && node --check tests/integration.test.js && node --check scripts/grant-license.js",
-    "test": "node tests/license.test.js && node tests/rate-limit.test.js && node tests/integration.test.js",
+    "check": "node --check server.js && node --check auth.js && node --check storage.js && node --check rate-limit.js && node --check offline-entitlement.js && node --check tests/license.test.js && node --check tests/rate-limit.test.js && node --check tests/offline-entitlement.test.js && node --check tests/integration.test.js && node --check scripts/grant-license.js",
+    "test": "node tests/license.test.js && node tests/rate-limit.test.js && node tests/offline-entitlement.test.js && node tests/integration.test.js",
     "license:grant": "node scripts/grant-license.js"
   },
   "dependencies": {
