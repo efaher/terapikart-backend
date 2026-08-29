@@ -19,6 +19,7 @@ function createAuthToken(advisor) {
   const payload = base64urlJson({
     sub: advisor.id,
     email: advisor.email,
+    ver: Number(advisor.authVersion || 1),
     exp: Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS
   });
   return `${payload}.${sign(payload)}`;
@@ -38,7 +39,8 @@ function verifyAuthToken(token) {
   try {
     const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
     if (!data.sub || !data.exp || data.exp <= Math.floor(Date.now() / 1000)) return null;
-    return data;
+    if (!Number.isInteger(Number(data.ver)) || Number(data.ver) < 1) return null;
+    return { ...data, ver: Number(data.ver) };
   } catch {
     return null;
   }
