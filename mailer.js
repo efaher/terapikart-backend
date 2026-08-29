@@ -8,8 +8,21 @@ const SMTP_PASS = String(process.env.SMTP_PASS || '');
 const MAIL_FROM = String(process.env.MAIL_FROM || SMTP_USER || '').trim();
 const FRONTEND_URL = String(process.env.FRONTEND_URL || '').replace(/\/$/, '');
 
+const MAIL_CONFIG_STATUS = {
+  smtpHost: Boolean(SMTP_HOST),
+  smtpPort: Number.isFinite(SMTP_PORT) && SMTP_PORT > 0,
+  smtpUser: Boolean(SMTP_USER),
+  smtpPassword: Boolean(SMTP_PASS),
+  mailFrom: Boolean(MAIL_FROM),
+  frontendUrl: Boolean(FRONTEND_URL)
+};
+MAIL_CONFIG_STATUS.ready = Object.values(MAIL_CONFIG_STATUS).every(Boolean);
+
+// Safe startup diagnostic: values and secrets are never printed.
+console.info('[mail] configuration', MAIL_CONFIG_STATUS);
+
 function mailConfigured() {
-  return Boolean(SMTP_HOST && SMTP_PORT && SMTP_USER && SMTP_PASS && MAIL_FROM && FRONTEND_URL);
+  return MAIL_CONFIG_STATUS.ready;
 }
 
 function escapeHtml(value) {
