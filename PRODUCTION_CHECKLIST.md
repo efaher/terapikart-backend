@@ -15,8 +15,9 @@ Bu belge V1.2 yıllık profesyonel lisans sürümünün ticari pilot öncesi asg
 - [ ] Veritabanı için düzenli yedek/geri yükleme yöntemi doğrulandı.
 - [x] Login/register/admin lisans endpointlerine uygulama-seviyesi rate limit eklendi ve otomatik test edildi. *(2026-08-29.)*
 - [x] Rate-limit istemci IP kaynağı Render/Cloudflare için `CF-Connecting-IP` öncelikli olacak şekilde sertleştirildi. *(2026-08-29.)*
-- [ ] Yeni fragment tabanlı danışan davet linki staging'de iki cihazla smoke test edildi. *(Kod ve CI tamam; saha doğrulaması bekleniyor.)*
-- [ ] Offline cihaz modu lisans yetkisi imzalı entitlement ile sertleştirildi.
+- [x] Rate-limit gerçek Render staging login endpointinde smoke test edildi. *(Sahte e-posta ile ilk 10 hatalı giriş 401, 11. istek 429 Too Many Requests: 2026-08-29.)*
+- [x] Yeni fragment tabanlı danışan davet linki staging'de iki cihazla smoke test edildi. *(Token adres çubuğundan temizlendi; danışanın kart seçimi danışman ekranına realtime ulaştı: 2026-08-29.)*
+- [x] Offline cihaz modu lisans yetkisi Ed25519 imzalı entitlement ile sertleştirildi ve gerçek cihazda internet tamamen kapalıyken doğrulandı. *(Yetki 29.09.2026 tarihine kadar geçerli; offline kart seçimi çalıştı: 2026-08-29.)*
 
 ## Pilot kabul senaryosu
 
