@@ -11,7 +11,7 @@ Bu belge V1.2 yıllık profesyonel lisans sürümünün ticari pilot öncesi asg
 - [ ] `ALLOWED_ORIGINS` üretim frontend adreslerini içeriyor.
 - [ ] HTTPS ve WebSocket bağlantısı gerçek üretim adresinden doğrulandı.
 - [x] `/health` yanıtında `persistentAccounts: true` görülüyor. *(Staging: 2026-08-27.)*
-- [ ] Sunucu yeniden başlatıldıktan sonra danışman hesabı ve lisans bilgisi korunuyor. *(Farklı tarayıcıdan Brave ile giriş başarılı; hesabın tarayıcıya bağımlı olmadığı doğrulandı. Gerçek sunucu restart testi ayrıca yapılacak.)*
+- [x] Sunucu yeniden başlatıldıktan sonra danışman hesabı ve lisans bilgisi korunuyor. *(Render staging servisi yeniden başlatıldı; ardından hesap açıldı ve yıllık lisans bilgisi korunmuş olarak görüldü: 2026-08-29.)*
 - [ ] Veritabanı için düzenli yedek/geri yükleme yöntemi doğrulandı.
 
 ## Pilot kabul senaryosu
@@ -51,7 +51,7 @@ Varsayılanlar:
 
 - oda azami ömrü: 6 saat
 - iki tarafın da ayrıldığı boş oda temizleme süresi: 30 dakika
-- temizlik kontrol aralığı: 15 dakika
+- temizlik kontrol aralığı: 15m
 - bir danışmanın aynı anda yalnız bir aktif odası bulunur
 - yeni oda açılırsa önceki oda `replaced` nedeni ile kapatılır
 - deneme hakkı oda oluştururken değil, danışan ilk kez gerçekten katıldığında tüketilir
