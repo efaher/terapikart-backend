@@ -196,6 +196,22 @@ async function run() {
     assert.ok(result.data.advisor.licenseUntil);
     const firstLicenseUntil = new Date(result.data.advisor.licenseUntil).getTime();
 
+    const encodedEmail = encodeURIComponent(TEST_EMAIL);
+    result = await request(`/api/admin/licenses/events?email=${encodedEmail}`, {
+      token: 'wrong-admin-secret'
+    });
+    assert.strictEqual(result.response.status, 401);
+
+    result = await request(`/api/admin/licenses/events?email=${encodedEmail}&limit=10`, {
+      token: ADMIN_SECRET
+    });
+    assert.strictEqual(result.response.status, 200);
+    assert.strictEqual(result.data.advisor.email, TEST_EMAIL.toLowerCase());
+    assert.strictEqual(result.data.events.length, 1);
+    assert.strictEqual(result.data.events[0].eventType, 'annual_activated');
+    assert.strictEqual(result.data.events[0].newLicenseUntil, result.data.advisor.licenseUntil);
+    assert.ok(!Object.prototype.hasOwnProperty.call(result.data.advisor, 'passwordHash'));
+
     result = await request('/api/me', { token: authToken });
     assert.strictEqual(result.data.canCreateSession, true);
     assert.strictEqual(result.data.advisor.plan, 'annual');
@@ -243,7 +259,16 @@ async function run() {
     const extensionDays = (renewedUntil - firstLicenseUntil) / (24 * 60 * 60 * 1000);
     assert.ok(extensionDays >= 364 && extensionDays <= 366, `Expected ~365 day extension, got ${extensionDays}`);
 
-    console.log('Integration test passed: auth, fair trial usage, annual license, realtime selection and role enforcement.');
+    result = await request(`/api/admin/licenses/events?email=${encodedEmail}&limit=10`, {
+      token: ADMIN_SECRET
+    });
+    assert.strictEqual(result.response.status, 200);
+    assert.strictEqual(result.data.events.length, 2);
+    assert.strictEqual(result.data.events[0].eventType, 'annual_activated');
+    assert.strictEqual(new Date(result.data.events[0].newLicenseUntil).getTime(), renewedUntil);
+    assert.strictEqual(new Date(result.data.events[1].newLicenseUntil).getTime(), firstLicenseUntil);
+
+    console.log('Integration test passed: auth, fair trial usage, annual license, audit events, realtime selection and role enforcement.');
   } catch (error) {
     console.error(childOutput);
     throw error;
