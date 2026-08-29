@@ -39,8 +39,6 @@ services:
         value: "true"
       - key: SMTP_USER
         value: noreply@efia.net.tr
-      - key: SMTP_PASS
-        sync: false
       - key: MAIL_FROM
         value: Persona Card <noreply@efia.net.tr>
       - key: FRONTEND_URL
