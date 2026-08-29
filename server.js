@@ -24,6 +24,7 @@ const {
   requestIp,
   normalizeKeyPart
 } = require('./rate-limit');
+const { createOfflineEntitlement } = require('./offline-entitlement');
 
 const PORT = process.env.PORT || 3001;
 const ADMIN_LICENSE_SECRET = String(process.env.ADMIN_LICENSE_SECRET || '');
@@ -298,6 +299,25 @@ app.get('/api/me', async (req, res) => {
   } catch (error) {
     console.error('[me]', error);
     return res.status(500).json({ code: 'SERVER_ERROR', message: 'Hesap bilgisi alınamadı.' });
+  }
+});
+
+app.get('/api/offline-entitlement', async (req, res) => {
+  try {
+    const advisor = await authenticatedAdvisorFromToken(getBearerToken(req));
+    if (!advisor) return res.status(401).json({ code: 'UNAUTHORIZED', message: 'Oturumunuz geçersiz veya süresi dolmuş.' });
+
+    const signed = createOfflineEntitlement(advisor);
+    if (!signed) {
+      return res.status(403).json({
+        code: 'LICENSE_REQUIRED',
+        message: 'Çevrimdışı cihaz modu için aktif yıllık lisans gerekir.'
+      });
+    }
+    return res.json(signed);
+  } catch (error) {
+    console.error('[offline-entitlement]', error);
+    return res.status(500).json({ code: 'SERVER_ERROR', message: 'Çevrimdışı kullanım yetkisi hazırlanamadı.' });
   }
 });
 
