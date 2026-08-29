@@ -31,6 +31,22 @@ services:
         value: "1800000"
       - key: ROOM_CLEANUP_INTERVAL_MS
         value: "900000"
+      - key: SMTP_HOST
+        value: mail.efia.net.tr
+      - key: SMTP_PORT
+        value: "465"
+      - key: SMTP_SECURE
+        value: "true"
+      - key: SMTP_USER
+        value: noreply@efia.net.tr
+      - key: SMTP_PASS
+        sync: false
+      - key: MAIL_FROM
+        value: Persona Card <noreply@efia.net.tr>
+      - key: FRONTEND_URL
+        value: https://deploy-preview-3--personitacard.netlify.app
+      - key: REQUIRE_EMAIL_VERIFICATION
+        value: "false"
 
 databases:
   - name: persona-card-v12-staging-db
