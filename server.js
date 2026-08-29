@@ -19,12 +19,22 @@ const {
   activateAnnualLicense,
   hasDatabase
 } = require('./storage');
+const {
+  createRateLimiter,
+  requestIp,
+  normalizeKeyPart
+} = require('./rate-limit');
 
 const PORT = process.env.PORT || 3001;
 const ADMIN_LICENSE_SECRET = String(process.env.ADMIN_LICENSE_SECRET || '');
 const ROOM_MAX_AGE_MS = Number(process.env.ROOM_MAX_AGE_MS || 6 * 60 * 60 * 1000);
 const ROOM_IDLE_CLEANUP_MS = Number(process.env.ROOM_IDLE_CLEANUP_MS || 30 * 60 * 1000);
 const ROOM_CLEANUP_INTERVAL_MS = Number(process.env.ROOM_CLEANUP_INTERVAL_MS || 15 * 60 * 1000);
+const AUTH_RATE_LIMIT_WINDOW_MS = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000);
+const AUTH_IP_RATE_LIMIT_MAX = Number(process.env.AUTH_IP_RATE_LIMIT_MAX || 60);
+const LOGIN_RATE_LIMIT_MAX = Number(process.env.LOGIN_RATE_LIMIT_MAX || 10);
+const REGISTER_RATE_LIMIT_MAX = Number(process.env.REGISTER_RATE_LIMIT_MAX || 8);
+const ADMIN_RATE_LIMIT_MAX = Number(process.env.ADMIN_RATE_LIMIT_MAX || 10);
 const DEFAULT_ORIGINS = [
   'https://personitacard.netlify.app',
   'http://localhost:5500',
@@ -38,6 +48,7 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || DEFAULT_ORIGINS.join(',')
   .filter(Boolean);
 
 const app = express();
+app.disable('x-powered-by');
 app.use(express.json({ limit: '32kb' }));
 app.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -49,6 +60,34 @@ app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   return next();
+});
+
+const authIpLimiter = createRateLimiter({
+  windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
+  max: AUTH_IP_RATE_LIMIT_MAX,
+  key: (req) => `auth-ip:${requestIp(req)}`,
+  message: 'Çok fazla kimlik doğrulama isteği gönderildi. Lütfen bir süre sonra tekrar deneyin.'
+});
+
+const loginLimiter = createRateLimiter({
+  windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
+  max: LOGIN_RATE_LIMIT_MAX,
+  key: (req) => `login:${requestIp(req)}:${normalizeKeyPart(req.body?.email)}`,
+  message: 'Çok fazla giriş denemesi yapıldı. Lütfen bir süre sonra tekrar deneyin.'
+});
+
+const registerLimiter = createRateLimiter({
+  windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
+  max: REGISTER_RATE_LIMIT_MAX,
+  key: (req) => `register:${requestIp(req)}`,
+  message: 'Bu bağlantıdan kısa sürede çok fazla hesap oluşturma isteği gönderildi. Lütfen daha sonra tekrar deneyin.'
+});
+
+const adminLimiter = createRateLimiter({
+  windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
+  max: ADMIN_RATE_LIMIT_MAX,
+  key: (req) => `admin-license:${requestIp(req)}`,
+  message: 'Çok fazla lisans yönetim isteği gönderildi. Lütfen bir süre sonra tekrar deneyin.'
 });
 
 const server = http.createServer(app);
@@ -204,7 +243,7 @@ app.get('/health', (req, res) => {
   res.json({ ok: true, rooms: rooms.size, persistentAccounts: hasDatabase });
 });
 
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', authIpLimiter, registerLimiter, async (req, res) => {
   try {
     const email = String(req.body?.email || '').trim().toLowerCase();
     const displayName = String(req.body?.displayName || '').trim();
@@ -233,7 +272,7 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', authIpLimiter, loginLimiter, async (req, res) => {
   try {
     const email = String(req.body?.email || '').trim().toLowerCase();
     const password = String(req.body?.password || '');
@@ -262,7 +301,7 @@ app.get('/api/me', async (req, res) => {
   }
 });
 
-app.post('/api/admin/licenses/annual', async (req, res) => {
+app.post('/api/admin/licenses/annual', adminLimiter, async (req, res) => {
   try {
     if (!adminAuthorized(req)) {
       return res.status(401).json({ code: 'UNAUTHORIZED', message: 'Lisans yönetim yetkisi doğrulanamadı.' });
