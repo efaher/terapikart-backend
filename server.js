@@ -18,6 +18,9 @@ const {
   consumeSessionCredit,
   activateAnnualLicense,
   listLicenseEvents,
+  createAccountToken,
+  verifyEmailWithToken,
+  resetPasswordWithToken,
   hasDatabase
 } = require('./storage');
 const {
@@ -26,9 +29,15 @@ const {
   normalizeKeyPart
 } = require('./rate-limit');
 const { createOfflineEntitlement } = require('./offline-entitlement');
+const {
+  mailConfigured,
+  sendEmailVerification,
+  sendPasswordReset
+} = require('./mailer');
 
 const PORT = process.env.PORT || 3001;
 const ADMIN_LICENSE_SECRET = String(process.env.ADMIN_LICENSE_SECRET || '');
+const REQUIRE_EMAIL_VERIFICATION = String(process.env.REQUIRE_EMAIL_VERIFICATION || '').trim().toLowerCase() === 'true';
 const ROOM_MAX_AGE_MS = Number(process.env.ROOM_MAX_AGE_MS || 6 * 60 * 60 * 1000);
 const ROOM_IDLE_CLEANUP_MS = Number(process.env.ROOM_IDLE_CLEANUP_MS || 30 * 60 * 1000);
 const ROOM_CLEANUP_INTERVAL_MS = Number(process.env.ROOM_CLEANUP_INTERVAL_MS || 15 * 60 * 1000);
@@ -36,6 +45,7 @@ const AUTH_RATE_LIMIT_WINDOW_MS = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS |
 const AUTH_IP_RATE_LIMIT_MAX = Number(process.env.AUTH_IP_RATE_LIMIT_MAX || 60);
 const LOGIN_RATE_LIMIT_MAX = Number(process.env.LOGIN_RATE_LIMIT_MAX || 10);
 const REGISTER_RATE_LIMIT_MAX = Number(process.env.REGISTER_RATE_LIMIT_MAX || 8);
+const ACCOUNT_ACTION_RATE_LIMIT_MAX = Number(process.env.ACCOUNT_ACTION_RATE_LIMIT_MAX || 5);
 const ADMIN_RATE_LIMIT_MAX = Number(process.env.ADMIN_RATE_LIMIT_MAX || 10);
 const DEFAULT_ORIGINS = [
   'https://personitacard.netlify.app',
@@ -83,6 +93,13 @@ const registerLimiter = createRateLimiter({
   max: REGISTER_RATE_LIMIT_MAX,
   key: (req) => `register:${requestIp(req)}`,
   message: 'Bu bağlantıdan kısa sürede çok fazla hesap oluşturma isteği gönderildi. Lütfen daha sonra tekrar deneyin.'
+});
+
+const accountActionLimiter = createRateLimiter({
+  windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
+  max: ACCOUNT_ACTION_RATE_LIMIT_MAX,
+  key: (req) => `account-action:${requestIp(req)}:${normalizeKeyPart(req.body?.email || '')}`,
+  message: 'Bu hesap işlemi kısa sürede çok fazla kez istendi. Lütfen bir süre sonra tekrar deneyin.'
 });
 
 const adminLimiter = createRateLimiter({
@@ -216,7 +233,10 @@ function getBearerToken(req) {
 async function authenticatedAdvisorFromToken(token) {
   const payload = verifyAuthToken(token);
   if (!payload) return null;
-  return findAdvisorById(payload.sub);
+  const advisor = await findAdvisorById(payload.sub);
+  if (!advisor) return null;
+  if (Number(payload.ver) !== Number(advisor.authVersion || 1)) return null;
+  return advisor;
 }
 
 function validEmail(email) {
@@ -232,17 +252,36 @@ function adminAuthorized(req) {
   return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
 
+function verificationBlocked(advisor) {
+  return REQUIRE_EMAIL_VERIFICATION && !advisor?.emailVerifiedAt;
+}
+
+function mailUnavailable(res) {
+  return res.status(503).json({
+    code: 'MAIL_NOT_CONFIGURED',
+    message: 'E-posta gönderim hizmeti henüz yapılandırılmadı.'
+  });
+}
+
 app.get('/', (req, res) => {
   res.json({
     name: 'Persona Card realtime backend',
     version: '1.2-annual-license-pwa',
     status: 'ok',
-    persistentAccounts: hasDatabase
+    persistentAccounts: hasDatabase,
+    emailVerificationRequired: REQUIRE_EMAIL_VERIFICATION,
+    mailConfigured: mailConfigured()
   });
 });
 
 app.get('/health', (req, res) => {
-  res.json({ ok: true, rooms: rooms.size, persistentAccounts: hasDatabase });
+  res.json({
+    ok: true,
+    rooms: rooms.size,
+    persistentAccounts: hasDatabase,
+    emailVerificationRequired: REQUIRE_EMAIL_VERIFICATION,
+    mailConfigured: mailConfigured()
+  });
 });
 
 app.post('/api/auth/register', authIpLimiter, registerLimiter, async (req, res) => {
@@ -264,7 +303,12 @@ app.post('/api/auth/register', authIpLimiter, registerLimiter, async (req, res) 
     });
     const token = createAuthToken(advisor);
 
-    return res.status(201).json({ token, advisor: publicAdvisor(advisor) });
+    return res.status(201).json({
+      token,
+      advisor: publicAdvisor(advisor),
+      emailVerificationRequired: REQUIRE_EMAIL_VERIFICATION,
+      mailConfigured: mailConfigured()
+    });
   } catch (error) {
     if (error.code === 'EMAIL_EXISTS') {
       return res.status(409).json({ code: 'EMAIL_EXISTS', message: 'Bu e-posta adresiyle daha önce hesap oluşturulmuş.' });
@@ -285,10 +329,103 @@ app.post('/api/auth/login', authIpLimiter, loginLimiter, async (req, res) => {
     }
 
     const token = createAuthToken(advisor);
-    return res.json({ token, advisor: publicAdvisor(advisor) });
+    return res.json({
+      token,
+      advisor: publicAdvisor(advisor),
+      emailVerificationRequired: REQUIRE_EMAIL_VERIFICATION,
+      mailConfigured: mailConfigured()
+    });
   } catch (error) {
     console.error('[login]', error);
     return res.status(500).json({ code: 'SERVER_ERROR', message: 'Giriş yapılamadı.' });
+  }
+});
+
+app.post('/api/auth/email-verification/request', authIpLimiter, accountActionLimiter, async (req, res) => {
+  try {
+    if (!mailConfigured()) return mailUnavailable(res);
+    const advisor = await authenticatedAdvisorFromToken(getBearerToken(req));
+    if (!advisor) return res.status(401).json({ code: 'UNAUTHORIZED', message: 'Oturumunuz geçersiz veya süresi dolmuş.' });
+    if (advisor.emailVerifiedAt) return res.json({ ok: true, alreadyVerified: true });
+
+    const verification = await createAccountToken(advisor.id, 'email_verification', 24 * 60);
+    await sendEmailVerification({
+      email: advisor.email,
+      displayName: advisor.displayName,
+      token: verification.token
+    });
+    return res.json({ ok: true, alreadyVerified: false });
+  } catch (error) {
+    console.error('[email-verification-request]', error);
+    if (error.code === 'MAIL_NOT_CONFIGURED') return mailUnavailable(res);
+    return res.status(500).json({ code: 'SERVER_ERROR', message: 'Doğrulama e-postası gönderilemedi.' });
+  }
+});
+
+app.post('/api/auth/email-verification/confirm', authIpLimiter, async (req, res) => {
+  try {
+    const token = String(req.body?.token || '').trim();
+    if (!token) return res.status(400).json({ code: 'INVALID_TOKEN', message: 'Doğrulama bağlantısı geçersiz.' });
+
+    const advisor = await verifyEmailWithToken(token);
+    if (!advisor) {
+      return res.status(400).json({ code: 'INVALID_OR_EXPIRED_TOKEN', message: 'Doğrulama bağlantısı geçersiz veya süresi dolmuş.' });
+    }
+
+    const authToken = createAuthToken(advisor);
+    return res.json({ token: authToken, advisor: publicAdvisor(advisor) });
+  } catch (error) {
+    console.error('[email-verification-confirm]', error);
+    return res.status(500).json({ code: 'SERVER_ERROR', message: 'E-posta doğrulanamadı.' });
+  }
+});
+
+app.post('/api/auth/password-reset/request', authIpLimiter, accountActionLimiter, async (req, res) => {
+  try {
+    if (!mailConfigured()) return mailUnavailable(res);
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!validEmail(email)) return res.status(400).json({ code: 'INVALID_EMAIL', message: 'Geçerli bir e-posta adresi girin.' });
+
+    const advisor = await findAdvisorByEmail(email);
+    if (advisor) {
+      const reset = await createAccountToken(advisor.id, 'password_reset', 60);
+      await sendPasswordReset({
+        email: advisor.email,
+        displayName: advisor.displayName,
+        token: reset.token
+      });
+    }
+
+    return res.json({
+      ok: true,
+      message: 'Bu e-posta adresiyle bir hesap varsa şifre sıfırlama bağlantısı gönderildi.'
+    });
+  } catch (error) {
+    console.error('[password-reset-request]', error);
+    if (error.code === 'MAIL_NOT_CONFIGURED') return mailUnavailable(res);
+    return res.status(500).json({ code: 'SERVER_ERROR', message: 'Şifre sıfırlama isteği tamamlanamadı.' });
+  }
+});
+
+app.post('/api/auth/password-reset/confirm', authIpLimiter, async (req, res) => {
+  try {
+    const token = String(req.body?.token || '').trim();
+    const password = String(req.body?.password || '');
+    if (!token) return res.status(400).json({ code: 'INVALID_TOKEN', message: 'Şifre sıfırlama bağlantısı geçersiz.' });
+    if (password.length < 8 || password.length > 128) {
+      return res.status(400).json({ code: 'INVALID_PASSWORD', message: 'Şifre en az 8 karakter olmalıdır.' });
+    }
+
+    const { salt, hash } = hashPassword(password);
+    const advisor = await resetPasswordWithToken(token, salt, hash);
+    if (!advisor) {
+      return res.status(400).json({ code: 'INVALID_OR_EXPIRED_TOKEN', message: 'Şifre sıfırlama bağlantısı geçersiz veya süresi dolmuş.' });
+    }
+
+    return res.json({ ok: true, message: 'Şifreniz güncellendi. Yeni şifrenizle giriş yapabilirsiniz.' });
+  } catch (error) {
+    console.error('[password-reset-confirm]', error);
+    return res.status(500).json({ code: 'SERVER_ERROR', message: 'Şifre güncellenemedi.' });
   }
 });
 
@@ -296,7 +433,12 @@ app.get('/api/me', async (req, res) => {
   try {
     const advisor = await authenticatedAdvisorFromToken(getBearerToken(req));
     if (!advisor) return res.status(401).json({ code: 'UNAUTHORIZED', message: 'Oturumunuz geçersiz veya süresi dolmuş.' });
-    return res.json({ advisor: publicAdvisor(advisor), canCreateSession: canCreateSession(advisor) });
+    return res.json({
+      advisor: publicAdvisor(advisor),
+      canCreateSession: canCreateSession(advisor) && !verificationBlocked(advisor),
+      emailVerificationRequired: REQUIRE_EMAIL_VERIFICATION,
+      mailConfigured: mailConfigured()
+    });
   } catch (error) {
     console.error('[me]', error);
     return res.status(500).json({ code: 'SERVER_ERROR', message: 'Hesap bilgisi alınamadı.' });
@@ -307,6 +449,12 @@ app.get('/api/offline-entitlement', async (req, res) => {
   try {
     const advisor = await authenticatedAdvisorFromToken(getBearerToken(req));
     if (!advisor) return res.status(401).json({ code: 'UNAUTHORIZED', message: 'Oturumunuz geçersiz veya süresi dolmuş.' });
+    if (verificationBlocked(advisor)) {
+      return res.status(403).json({
+        code: 'EMAIL_VERIFICATION_REQUIRED',
+        message: 'Çevrimdışı cihaz modu için e-posta adresinizi doğrulayın.'
+      });
+    }
 
     const signed = createOfflineEntitlement(advisor);
     if (!signed) {
@@ -385,6 +533,11 @@ io.on('connection', (socket) => {
       const advisor = await authenticatedAdvisorFromToken(authToken);
       if (!advisor) {
         socket.emit('sessionError', { code: 'AUTH_REQUIRED', message: 'Kart çalışması başlatmak için danışman hesabınıza giriş yapın.' });
+        return;
+      }
+
+      if (verificationBlocked(advisor)) {
+        socket.emit('sessionError', { code: 'EMAIL_VERIFICATION_REQUIRED', message: 'Kart çalışması başlatmak için e-posta adresinizi doğrulayın.' });
         return;
       }
 
