@@ -49,6 +49,9 @@ function getTransporter() {
       requireTLS: !SMTP_SECURE,
       auth: { user: SMTP_USER, pass: SMTP_PASS },
       tls: { minVersion: 'TLSv1.2' },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
       disableFileAccess: true,
       disableUrlAccess: true
     });
