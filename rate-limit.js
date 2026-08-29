@@ -3,10 +3,15 @@ function normalizeKeyPart(value) {
 }
 
 function requestIp(req) {
+  const cloudflareIp = String(req?.headers?.['cf-connecting-ip'] || '').trim();
+  if (cloudflareIp) return cloudflareIp;
+
   const forwarded = String(req?.headers?.['x-forwarded-for'] || '')
-    .split(',')[0]
-    .trim();
-  if (forwarded) return forwarded;
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (forwarded.length > 0) return forwarded[forwarded.length - 1];
+
   return String(req?.ip || req?.socket?.remoteAddress || 'unknown');
 }
 
