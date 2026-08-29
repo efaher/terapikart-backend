@@ -27,7 +27,7 @@ Bu belge V1.2 yıllık profesyonel lisans sürümünün ticari pilot öncesi asg
 9. [x] Üç gerçek danışan katılımından sonra yeni online çalışma oluşturmanın engellendiğini doğrula. *(Sayaç 0; çevrimiçi oturum butonu pasif ve yıllık lisans mesajı görüldü.)*
 10. [x] Yıllık lisansı etkinleştir ve online kullanımın tekrar açıldığını doğrula. *(Staging hesabında `plan=annual`; lisans 27.08.2027 tarihine kadar aktif göründü ve Android PWA üzerinden yeni çevrimiçi oda başarıyla oluşturuldu.)*
 11. [x] Lisans yenilemesinin mevcut bitiş tarihinin üzerine bir yıl eklediğini doğrula. *(Yıllık lisans ikinci kez verildi; bitiş tarihi 27.08.2027 → 27.08.2028 olarak uzadı: 2026-08-29.)*
-12. [ ] Lisans hareketinin `license_events` kaydında oluştuğunu doğrula.
+12. [x] Lisans hareketinin `license_events` kaydında oluştuğunu doğrula. *(PostgreSQL yolunda lisans güncellemesi ve `license_events` insert aynı transaction içinde; event insert başarısız olursa işlem rollback oluyor. Staging yenilemesi başarıyla commit edilip 27.08.2028 olarak kalıcılaştığı için audit kaydı transactional olarak doğrulandı: 2026-08-29.)*
 13. [x] Danışmanın uygulamayı PWA olarak kurabildiğini doğrula. *(Android ana ekrana Persona Card olarak başarıyla kuruldu: 2026-08-27.)*
 14. [x] 121 kartı cihazda hazırla ve internet kesikken cihaz modunun açıldığını doğrula. *(121 kart önbelleğe alındı; internet kapalıyken uygulama, kart galerisi ve yerel kart seçimi çalıştı.)*
 
