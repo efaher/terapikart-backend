@@ -13,6 +13,10 @@ Bu belge V1.2 yıllık profesyonel lisans sürümünün ticari pilot öncesi asg
 - [x] `/health` yanıtında `persistentAccounts: true` görülüyor. *(Staging: 2026-08-27.)*
 - [x] Sunucu yeniden başlatıldıktan sonra danışman hesabı ve lisans bilgisi korunuyor. *(Render staging servisi yeniden başlatıldı; ardından hesap açıldı ve yıllık lisans bilgisi korunmuş olarak görüldü: 2026-08-29.)*
 - [ ] Veritabanı için düzenli yedek/geri yükleme yöntemi doğrulandı.
+- [x] Login/register/admin lisans endpointlerine uygulama-seviyesi rate limit eklendi ve otomatik test edildi. *(2026-08-29.)*
+- [x] Rate-limit istemci IP kaynağı Render/Cloudflare için `CF-Connecting-IP` öncelikli olacak şekilde sertleştirildi. *(2026-08-29.)*
+- [ ] Yeni fragment tabanlı danışan davet linki staging'de iki cihazla smoke test edildi. *(Kod ve CI tamam; saha doğrulaması bekleniyor.)*
+- [ ] Offline cihaz modu lisans yetkisi imzalı entitlement ile sertleştirildi.
 
 ## Pilot kabul senaryosu
 
