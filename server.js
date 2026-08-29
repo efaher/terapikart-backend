@@ -17,6 +17,7 @@ const {
   canCreateSession,
   consumeSessionCredit,
   activateAnnualLicense,
+  listLicenseEvents,
   hasDatabase
 } = require('./storage');
 const {
@@ -342,6 +343,34 @@ app.post('/api/admin/licenses/annual', adminLimiter, async (req, res) => {
   } catch (error) {
     console.error('[annual-license]', error);
     return res.status(500).json({ code: 'SERVER_ERROR', message: 'Yıllık lisans etkinleştirilemedi.' });
+  }
+});
+
+app.get('/api/admin/licenses/events', adminLimiter, async (req, res) => {
+  try {
+    if (!adminAuthorized(req)) {
+      return res.status(401).json({ code: 'UNAUTHORIZED', message: 'Lisans yönetim yetkisi doğrulanamadı.' });
+    }
+
+    const email = String(req.query?.email || '').trim().toLowerCase();
+    if (!validEmail(email)) {
+      return res.status(400).json({ code: 'INVALID_EMAIL', message: 'Geçerli bir danışman e-postası girin.' });
+    }
+
+    const advisor = await findAdvisorByEmail(email);
+    if (!advisor) {
+      return res.status(404).json({ code: 'ADVISOR_NOT_FOUND', message: 'Danışman hesabı bulunamadı.' });
+    }
+
+    const requestedLimit = Number(req.query?.limit || 50);
+    const limit = Number.isFinite(requestedLimit)
+      ? Math.max(1, Math.min(Math.floor(requestedLimit), 100))
+      : 50;
+    const events = await listLicenseEvents(advisor.id, limit);
+    return res.json({ advisor: publicAdvisor(advisor), events });
+  } catch (error) {
+    console.error('[license-events]', error);
+    return res.status(500).json({ code: 'SERVER_ERROR', message: 'Lisans hareketleri alınamadı.' });
   }
 });
 
