@@ -5,6 +5,8 @@ let pool = null;
 const memoryAdvisors = new Map();
 const memoryByEmail = new Map();
 const memoryLicenseEvents = [];
+const memoryAccountTokens = new Map();
+const ACCOUNT_TOKEN_PURPOSES = new Set(['email_verification', 'password_reset']);
 
 if (hasDatabase) {
   const { Pool } = require('pg');
@@ -35,6 +37,7 @@ function publicAdvisor(advisor) {
     plan: advisor.plan,
     trialSessionsRemaining: advisor.trialSessionsRemaining,
     licenseUntil: advisor.licenseUntil || null,
+    emailVerified: Boolean(advisor.emailVerifiedAt),
     createdAt: advisor.createdAt
   };
 }
@@ -47,9 +50,11 @@ function rowToAdvisor(row) {
     displayName: row.display_name,
     passwordSalt: row.password_salt,
     passwordHash: row.password_hash,
+    authVersion: Number(row.auth_version || 1),
     plan: row.plan,
     trialSessionsRemaining: row.trial_sessions_remaining,
     licenseUntil: row.license_until ? new Date(row.license_until).toISOString() : null,
+    emailVerifiedAt: row.email_verified_at ? new Date(row.email_verified_at).toISOString() : null,
     createdAt: new Date(row.created_at).toISOString()
   };
 }
@@ -68,6 +73,18 @@ function rowToLicenseEvent(row) {
   };
 }
 
+function accountTokenHash(token) {
+  return crypto.createHash('sha256').update(String(token || '')).digest('hex');
+}
+
+function validateAccountTokenPurpose(purpose) {
+  if (!ACCOUNT_TOKEN_PURPOSES.has(purpose)) {
+    const error = new Error('INVALID_TOKEN_PURPOSE');
+    error.code = 'INVALID_TOKEN_PURPOSE';
+    throw error;
+  }
+}
+
 async function initStorage() {
   if (!pool) {
     console.warn('[storage] DATABASE_URL is not configured. Advisor accounts are temporary and reset on restart.');
@@ -81,12 +98,17 @@ async function initStorage() {
       display_name TEXT NOT NULL,
       password_salt TEXT NOT NULL,
       password_hash TEXT NOT NULL,
+      auth_version INTEGER NOT NULL DEFAULT 1,
       plan TEXT NOT NULL DEFAULT 'trial',
       trial_sessions_remaining INTEGER NOT NULL DEFAULT 3,
       license_until TIMESTAMPTZ NULL,
+      email_verified_at TIMESTAMPTZ NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+
+  await pool.query(`ALTER TABLE advisors ADD COLUMN IF NOT EXISTS auth_version INTEGER NOT NULL DEFAULT 1`);
+  await pool.query(`ALTER TABLE advisors ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ NULL`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS license_events (
@@ -105,6 +127,27 @@ async function initStorage() {
     CREATE INDEX IF NOT EXISTS license_events_advisor_created_idx
       ON license_events (advisor_id, created_at DESC)
   `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS account_tokens (
+      id UUID PRIMARY KEY,
+      advisor_id UUID NOT NULL REFERENCES advisors(id) ON DELETE CASCADE,
+      purpose TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      consumed_at TIMESTAMPTZ NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS account_tokens_advisor_purpose_created_idx
+      ON account_tokens (advisor_id, purpose, created_at DESC)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS account_tokens_hash_idx
+      ON account_tokens (token_hash)
+  `);
 }
 
 async function createAdvisor({ email, displayName, passwordSalt, passwordHash }) {
@@ -116,9 +159,11 @@ async function createAdvisor({ email, displayName, passwordSalt, passwordHash })
     displayName: String(displayName || '').trim(),
     passwordSalt,
     passwordHash,
+    authVersion: 1,
     plan: 'trial',
     trialSessionsRemaining: 3,
     licenseUntil: null,
+    emailVerifiedAt: null,
     createdAt: new Date().toISOString()
   };
 
@@ -136,8 +181,8 @@ async function createAdvisor({ email, displayName, passwordSalt, passwordHash })
   try {
     const result = await pool.query(
       `INSERT INTO advisors
-        (id, email, display_name, password_salt, password_hash)
-       VALUES ($1, $2, $3, $4, $5)
+        (id, email, display_name, password_salt, password_hash, auth_version)
+       VALUES ($1, $2, $3, $4, $5, 1)
        RETURNING *`,
       [id, normalizedEmail, advisor.displayName, passwordSalt, passwordHash]
     );
@@ -289,6 +334,174 @@ async function listLicenseEvents(advisorId, limit = 50) {
   return result.rows.map(rowToLicenseEvent);
 }
 
+async function createAccountToken(advisorId, purpose, ttlMinutes) {
+  validateAccountTokenPurpose(purpose);
+  const advisor = await findAdvisorById(advisorId);
+  if (!advisor) return null;
+
+  const token = crypto.randomBytes(32).toString('base64url');
+  const tokenHash = accountTokenHash(token);
+  const expiresAt = new Date(Date.now() + Math.max(1, Number(ttlMinutes) || 60) * 60 * 1000).toISOString();
+  const createdAt = new Date().toISOString();
+
+  if (!pool) {
+    for (const record of memoryAccountTokens.values()) {
+      if (record.advisorId === advisorId && record.purpose === purpose && !record.consumedAt) {
+        record.consumedAt = createdAt;
+      }
+    }
+    memoryAccountTokens.set(tokenHash, {
+      id: crypto.randomUUID(),
+      advisorId,
+      purpose,
+      tokenHash,
+      expiresAt,
+      consumedAt: null,
+      createdAt
+    });
+    return { token, expiresAt };
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `UPDATE account_tokens
+          SET consumed_at = NOW()
+        WHERE advisor_id = $1 AND purpose = $2 AND consumed_at IS NULL`,
+      [advisorId, purpose]
+    );
+    await client.query(
+      `INSERT INTO account_tokens (id, advisor_id, purpose, token_hash, expires_at)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [crypto.randomUUID(), advisorId, purpose, tokenHash, expiresAt]
+    );
+    await client.query('COMMIT');
+    return { token, expiresAt };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function validMemoryToken(rawToken, purpose) {
+  const tokenHash = accountTokenHash(rawToken);
+  const record = memoryAccountTokens.get(tokenHash);
+  if (!record || record.purpose !== purpose || record.consumedAt) return null;
+  if (new Date(record.expiresAt).getTime() <= Date.now()) return null;
+  return record;
+}
+
+async function verifyEmailWithToken(rawToken) {
+  if (!rawToken) return null;
+  const purpose = 'email_verification';
+
+  if (!pool) {
+    const record = validMemoryToken(rawToken, purpose);
+    if (!record) return null;
+    const advisor = memoryAdvisors.get(record.advisorId);
+    if (!advisor) return null;
+    const now = new Date().toISOString();
+    record.consumedAt = now;
+    const updated = { ...advisor, emailVerifiedAt: advisor.emailVerifiedAt || now };
+    memoryAdvisors.set(updated.id, cloneAdvisor(updated));
+    return cloneAdvisor(updated);
+  }
+
+  const tokenHash = accountTokenHash(rawToken);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const tokenResult = await client.query(
+      `SELECT * FROM account_tokens
+        WHERE token_hash = $1 AND purpose = $2
+          AND consumed_at IS NULL AND expires_at > NOW()
+        LIMIT 1 FOR UPDATE`,
+      [tokenHash, purpose]
+    );
+    const record = tokenResult.rows[0];
+    if (!record) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+
+    await client.query('UPDATE account_tokens SET consumed_at = NOW() WHERE id = $1', [record.id]);
+    const advisorResult = await client.query(
+      `UPDATE advisors
+          SET email_verified_at = COALESCE(email_verified_at, NOW())
+        WHERE id = $1
+        RETURNING *`,
+      [record.advisor_id]
+    );
+    await client.query('COMMIT');
+    return rowToAdvisor(advisorResult.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function resetPasswordWithToken(rawToken, passwordSalt, passwordHash) {
+  if (!rawToken || !passwordSalt || !passwordHash) return null;
+  const purpose = 'password_reset';
+
+  if (!pool) {
+    const record = validMemoryToken(rawToken, purpose);
+    if (!record) return null;
+    const advisor = memoryAdvisors.get(record.advisorId);
+    if (!advisor) return null;
+    record.consumedAt = new Date().toISOString();
+    const updated = {
+      ...advisor,
+      passwordSalt,
+      passwordHash,
+      authVersion: Number(advisor.authVersion || 1) + 1
+    };
+    memoryAdvisors.set(updated.id, cloneAdvisor(updated));
+    return cloneAdvisor(updated);
+  }
+
+  const tokenHash = accountTokenHash(rawToken);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const tokenResult = await client.query(
+      `SELECT * FROM account_tokens
+        WHERE token_hash = $1 AND purpose = $2
+          AND consumed_at IS NULL AND expires_at > NOW()
+        LIMIT 1 FOR UPDATE`,
+      [tokenHash, purpose]
+    );
+    const record = tokenResult.rows[0];
+    if (!record) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+
+    await client.query('UPDATE account_tokens SET consumed_at = NOW() WHERE id = $1', [record.id]);
+    const advisorResult = await client.query(
+      `UPDATE advisors
+          SET password_salt = $2,
+              password_hash = $3,
+              auth_version = auth_version + 1
+        WHERE id = $1
+        RETURNING *`,
+      [record.advisor_id, passwordSalt, passwordHash]
+    );
+    await client.query('COMMIT');
+    return rowToAdvisor(advisorResult.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   initStorage,
   createAdvisor,
@@ -299,6 +512,9 @@ module.exports = {
   consumeSessionCredit,
   activateAnnualLicense,
   listLicenseEvents,
+  createAccountToken,
+  verifyEmailWithToken,
+  resetPasswordWithToken,
   hasActiveLicense,
   hasDatabase
 };
