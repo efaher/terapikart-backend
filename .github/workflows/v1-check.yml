@@ -1,8 +1,8 @@
-name: Persona Card Backend V1 Checks
+name: Persona Card Backend Checks
 
 on:
   push:
-    branches: [v1-commercial-foundation]
+    branches: [v1.2-annual-license-pwa]
   pull_request:
     branches: [main]
 
@@ -18,5 +18,9 @@ jobs:
           node-version: '20'
       - name: Install dependencies
         run: npm install --ignore-scripts --no-audit --no-fund
-      - name: Check server syntax
-        run: node --check server.js
+      - name: Check backend syntax
+        run: npm run check
+      - name: Test annual license behavior
+        run: npm test
+      - name: Validate Render Blueprint YAML
+        run: ruby -e "require 'yaml'; YAML.load_file('render.yaml'); puts 'render.yaml ok'"
