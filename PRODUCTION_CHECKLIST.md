@@ -18,6 +18,10 @@ Bu belge V1.2 yıllık profesyonel lisans sürümünün ticari pilot öncesi asg
 - [x] Rate-limit gerçek Render staging login endpointinde smoke test edildi. *(Sahte e-posta ile ilk 10 hatalı giriş 401, 11. istek 429 Too Many Requests: 2026-08-29.)*
 - [x] Yeni fragment tabanlı danışan davet linki staging'de iki cihazla smoke test edildi. *(Token adres çubuğundan temizlendi; danışanın kart seçimi danışman ekranına realtime ulaştı: 2026-08-29.)*
 - [x] Offline cihaz modu lisans yetkisi Ed25519 imzalı entitlement ile sertleştirildi ve gerçek cihazda internet tamamen kapalıyken doğrulandı. *(Yetki 29.09.2026 tarihine kadar geçerli; offline kart seçimi çalıştı: 2026-08-29.)*
+- [x] Staging transactional e-posta sağlayıcısı Resend HTTPS API olarak yapılandırıldı; `efia.net.tr` alan adı doğrulandı ve `/health` yanıtında `mailConfigured: true` görüldü. *(2026-08-30.)*
+- [x] Şifre sıfırlama gerçek e-posta smoke testi tamamlandı. *(Resend üzerinden bağlantı ulaştı; yeni şifre kaydedildi; eski şifre reddedildi ve yeni şifreyle giriş başarılı oldu: 2026-08-30.)*
+- [x] E-posta doğrulama zorunluluğu staging'de etkinleştirildi ve `/health` yanıtında `emailVerificationRequired: true` görüldü. *(2026-08-30.)*
+- [x] Doğrulanmamış danışmanın çevrimiçi çalışma başlatması engellendi; doğrulama bölümüne yönlendirme görüldü. Doğrulama e-postası sonrası aynı hesap çevrimiçi çalışma başlattı, danışan bağlantısından kart seçimi yapıldı ve oturum kapatıldı. *(2026-08-30.)*
 
 ## Pilot kabul senaryosu
 
@@ -35,6 +39,23 @@ Bu belge V1.2 yıllık profesyonel lisans sürümünün ticari pilot öncesi asg
 12. [x] Lisans hareketinin `license_events` kaydında oluştuğunu doğrula. *(PostgreSQL yolunda lisans güncellemesi ve `license_events` insert aynı transaction içinde; event insert başarısız olursa işlem rollback oluyor. Staging yenilemesi başarıyla commit edilip 27.08.2028 olarak kalıcılaştığı için audit kaydı transactional olarak doğrulandı: 2026-08-29.)*
 13. [x] Danışmanın uygulamayı PWA olarak kurabildiğini doğrula. *(Android ana ekrana Persona Card olarak başarıyla kuruldu: 2026-08-27.)*
 14. [x] 121 kartı cihazda hazırla ve internet kesikken cihaz modunun açıldığını doğrula. *(121 kart önbelleğe alındı; internet kapalıyken uygulama, kart galerisi ve yerel kart seçimi çalıştı.)*
+15. [x] Gerçek şifre sıfırlama e-postasının ulaşmasını ve yeni şifrenin kullanılabildiğini doğrula. *(2026-08-30.)*
+16. [x] E-posta doğrulaması zorunluyken doğrulanmamış hesabın çalışma başlatamadığını doğrula. *(2026-08-30.)*
+17. [x] Doğrulama bağlantısından sonra aynı hesabın çalışma başlatabildiğini ve danışanla gerçek zamanlı kart seçimi yapılabildiğini doğrula. *(2026-08-30.)*
+
+## Üretime geçişte kalan teknik engeller
+
+Aşağıdaki maddeler staging kabulünden bağımsız olarak gerçek üretim geçişinden önce tamamlanmalıdır:
+
+1. [ ] Staging'den ayrı, kalıcı üretim PostgreSQL veritabanını oluştur ve üretim `DATABASE_URL` secret'ını bağla.
+2. [ ] Üretim veritabanında düzenli yedekleme yöntemini belirle ve gerçek geri yükleme provası yap.
+3. [ ] Ayrı üretim backend servisini HTTPS/WSS üzerinde yayına al.
+4. [ ] Üretim `ALLOWED_ORIGINS` değerini yalnız gerçek frontend origin(ler)i ile sınırla.
+5. [ ] Üretim frontend'inde backend adresini gerçek üretim API adresine sabitle ve legacy backend kullanımını reddeden guard'ı doğrula.
+6. [ ] Üretim cutover smoke testi yap: kayıt/giriş, e-posta doğrulama, şifre sıfırlama, oda oluşturma, güvenli danışan linki, realtime seçim, oturum kapatma ve lisans kontrolü.
+7. [ ] Üretim PostgreSQL ve backend için ücretli kaynak açılması gerekiyorsa maliyet onayı alınmadan kaynak oluşturma.
+
+Bu bölüm tamamlanmadan V1.2 branch'i production cutover için main'e birleştirilmez.
 
 ## Pilot dönemde manuel lisans verme
 
